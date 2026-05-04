@@ -52,6 +52,17 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Write .env for build
+        working-directory: frontend
+        run: |
+          cat > .env <<'EOF'
+          VITE_API_BASE_URL=https://bs4rhhaumi.execute-api.us-east-1.amazonaws.com/prod
+          VITE_COGNITO_USER_POOL_ID=us-east-1_XBpo1Myjc
+          VITE_COGNITO_CLIENT_ID=6kbpbtjq70orm7p7tm4mcjckv9
+          VITE_COGNITO_REGION=us-east-1
+          VITE_STRIPE_PUBLISHABLE_KEY=pk_live_51T3q0lGcAJKXJ7cgM6I06dZK4ypWzZ1SvZfaduzwv9InkPRHXZLQvplFeijS7sjb7eL8QQSxzD7zY6SkC0JlA0CN00kjBLoifM
+          EOF
+
       - name: Build
         working-directory: frontend
         run: |
