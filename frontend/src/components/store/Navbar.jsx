@@ -4,7 +4,7 @@ import { ShoppingCart, Menu, X } from 'lucide-react'
 import { useCartStore } from '../../store/cartStore'
 
 const NAV_LINKS = [
-  { label: 'Hello', href: '/shop' },
+  { label: 'Shop', href: '/shop' },
   { label: 'About', href: '/about' },
   { label: 'Support', href: '/support' },
   { label: 'Contact', href: '/contact' },
