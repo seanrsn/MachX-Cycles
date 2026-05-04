@@ -1,0 +1,105 @@
+# MachX Cycles — Remove Variants / Add `sold` Field Refactor
+
+## Context
+MachX Cycles is a **used bike reseller**. Every bike listing is a 1-of-1. There is no concept of stock levels, variants, or quantities. When a bike sells, it's sold. That's it.
+
+The current codebase has a full variant system (bike_variants table, stock_count, low stock alerts) that was built for new-bike retail. We're ripping all of that out.
+
+## Project structure
+- Backend (Python Lambdas): `C:\Users\super\Projects\machx-cycles\backend\functions\`
+  - `admin_api.py` — admin Lambda
+  - `bikes_public.py` — public bike listing Lambda
+  - `checkout.py` and `checkout_db.py` — checkout Lambdas
+  - `stripe_webhook.py` — Stripe webhook Lambda
+- Frontend (React/Vite): `C:\Users\super\Projects\machx-cycles\frontend\src\`
+  - `pages/admin/BikeForm.jsx` — admin bike editor (has variant manager to remove)
+  - `pages/admin/Dashboard.jsx` — admin dashboard (has low stock alert to remove)
+  - `pages/admin/Bikes.jsx` — admin bike list
+  - `api/admin.js` — API calls
+- DB: MySQL on RDS (`machx_cycles` database). Credentials via AWS Secrets Manager (`machx-db-credentials`).
+
+## What to do
+
+### 1. Database migration
+Write and run a Python script (`backend/migrate_sold.py`) that:
+- Adds `sold BOOLEAN NOT NULL DEFAULT FALSE` column to the `bikes` table (if not already present)
+- Does NOT drop `bike_variants` yet (leave the table, we'll clean it up later — don't want to risk data loss)
+- Commits and prints confirmation
+
+Run the script against the real DB using boto3 + Secrets Manager (same pattern as `backend/cleanup_pending.py`).
+
+### 2. admin_api.py changes
+- Remove the 3 variant endpoints (create_variant, update_variant, delete_variant) and their route handlers
+- Remove the `_RE_VARIANTS` and `_RE_VARIANT` regex patterns and their dispatch blocks
+- In `list_bikes()`: remove the `LEFT JOIN bike_variants` and `variant_count` from the query. Add `b.sold` to the SELECT.
+- In `get_bike()`: remove `SELECT * FROM bike_variants WHERE bike_id = %s` and `bike['variants'] = ...`. Add `sold` field to the returned bike dict.
+- In `create_bike()` and `update_bike()`: support setting `sold` boolean from request body (default false on create). When updating, if `sold` is in the body, update `bikes.sold` accordingly.
+- In `get_dashboard()`: remove the entire low_stock query and the `low_stock` key from the returned dict. Also remove it from the response dict at the bottom of the function.
+
+### 3. bikes_public.py changes
+- The public listing currently joins bike_variants for price/stock info. Simplify it:
+  - Remove any JOIN to bike_variants
+  - Filter to `WHERE b.is_active = 1` (keep this)
+  - Add `b.sold` to the SELECT so the storefront can show a SOLD badge if needed
+  - Price comes from `b.price` directly (it already exists on bikes table)
+
+### 4. stripe_webhook.py changes
+- When a payment succeeds and order is confirmed, mark the bike as sold:
+  - After updating `orders.payment_status = 'paid'`, also run:
+    `UPDATE bikes SET sold = TRUE WHERE id = (SELECT bike_id FROM order_items WHERE order_id = %s LIMIT 1)`
+  - This ensures that when a bike sells via Stripe checkout, it's automatically marked sold in the DB.
+
+### 5. checkout.py / checkout_db.py changes
+- Remove any variant stock checks (checking stock_count, decrementing stock, etc.)
+- Keep the rest of the checkout flow intact
+
+### 6. Frontend — BikeForm.jsx
+- Remove the entire VariantManager section (the component that adds/edits/deletes variants with frame_size, color, stock_count, price_override fields)
+- Remove imports: createVariant, updateVariant, deleteVariant from api/admin
+- Remove the emptyVariant helper and all variant state
+- Add a simple "Mark as Sold" toggle/checkbox in the bike form — a boolean field that sets `sold: true/false`. Put it near the top of the form, styled clearly (e.g. a red toggle when sold, green when available).
+- On save, include `sold` in the bike payload sent to the API.
+
+### 7. Frontend — Dashboard.jsx
+- Remove the entire low stock alert section (the yellow AlertTriangle block at the bottom)
+- Remove the AlertTriangle import from lucide-react
+- Remove any reference to `d.low_stock`
+
+### 8. Frontend — Bikes.jsx (admin bike list)
+- Replace `variant_count` display with a "SOLD" / "Available" badge on each bike row
+- Use a red badge for sold, green for available
+
+### 9. Frontend — api/admin.js
+- Remove createVariant, updateVariant, deleteVariant exports
+- Keep everything else
+
+## Deploy steps (do all of these after code changes)
+
+### Deploy Lambda functions
+For each changed Lambda (admin_api.py, bikes_public.py, stripe_webhook.py, checkout.py/checkout_db.py):
+
+1. Download the currently deployed zip from AWS:
+```
+aws lambda get-function --function-name <name> --query 'Code.Location' --output text --region us-east-1
+```
+Then use Invoke-WebRequest to download it.
+
+2. Patch it: open the downloaded zip, replace the relevant .py file with the updated version, save as new zip.
+
+3. Upload:
+```
+aws lambda update-function-code --function-name <name> --zip-file fileb://<patched>.zip --region us-east-1
+```
+
+Lambda function names: `admin-api`, `bikes-public`, `stripe-webhook`, `checkout`, `checkout-db`
+
+### Deploy frontend
+```
+cd C:\Users\super\Projects\machx-cycles\frontend
+npm run build
+aws s3 sync dist/ s3://machx-cycles-frontend --delete --region us-east-1
+```
+
+## Done signal
+When completely finished with ALL steps (migration run, all Lambdas deployed, frontend deployed), run:
+openclaw system event --text "Done: MachX sold-field refactor complete. DB migrated, all Lambdas redeployed, frontend built and pushed to S3." --mode now

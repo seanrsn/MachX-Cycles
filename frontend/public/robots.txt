@@ -1,0 +1,8 @@
+# MachX Cycles - robots.txt
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+
+# Sitemap
+Sitemap: https://machxcycles.com/sitemap.xml

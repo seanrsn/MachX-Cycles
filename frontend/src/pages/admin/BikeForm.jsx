@@ -1,0 +1,411 @@
+import { useState, useEffect, useRef } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Plus, Trash2, Save, Upload, X, Film, ImageIcon, CheckCircle, Bike } from 'lucide-react'
+import {
+  getBike, createBike, updateBike,
+  getUploadUrl, deleteImage,
+} from '../../api/admin'
+import { PageHeader, Button, Spinner } from '../../components/common'
+
+const CATEGORIES = [
+  { id: 1, name: 'Road' }, { id: 2, name: 'Mountain' }, { id: 3, name: 'Hybrid' },
+  { id: 4, name: 'Cruiser' }, { id: 5, name: 'Gravel' }, { id: 6, name: 'E-Bike' },
+]
+const MATERIALS = ['Carbon Fiber', 'Aluminum', 'Steel', 'Titanium']
+const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/quicktime', 'video/mov']
+const ACCEPT_ATTR    = '.jpg,.jpeg,.png,.webp,.gif,.mp4,.mov,image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime'
+const IMAGE_MAX = 10 * 1024 * 1024   // 10 MB
+const VIDEO_MAX = 100 * 1024 * 1024  // 100 MB
+
+function isVideo(url) {
+  return /\.(mp4|mov|quicktime)(\?|$)/i.test(url)
+}
+
+// ── ImageManager ──────────────────────────────────────────────────────────────
+
+function ImageManager({ bikeId, initialImages = [] }) {
+  const [images, setImages]       = useState(initialImages)
+  const [uploads, setUploads]     = useState([])   // { id, file, progress, error, done }
+  const [dragging, setDragging]   = useState(false)
+  const fileRef                   = useRef(null)
+  const disabled                  = !bikeId
+
+  useEffect(() => { setImages(initialImages) }, [initialImages.length])
+
+  async function handleFiles(files) {
+    const list = Array.from(files)
+    const newUploads = list.map(f => ({ id: Math.random().toString(36).slice(2), file: f, progress: 0, error: null, done: false }))
+    setUploads(prev => [...prev, ...newUploads])
+
+    for (const item of newUploads) {
+      const { file } = item
+      const isVid = file.type.startsWith('video/')
+      const limit = isVid ? VIDEO_MAX : IMAGE_MAX
+
+      if (!ACCEPTED_TYPES.includes(file.type)) {
+        setUploads(prev => prev.map(u => u.id === item.id ? { ...u, error: 'Unsupported file type' } : u))
+        continue
+      }
+      if (file.size > limit) {
+        const mb = isVid ? '100' : '10'
+        setUploads(prev => prev.map(u => u.id === item.id ? { ...u, error: `File exceeds ${mb} MB limit` } : u))
+        continue
+      }
+
+      try {
+        // 1. Get presigned URL
+        const { upload_url, image_url, image_id } = await getUploadUrl(bikeId, {
+          filename:     file.name,
+          content_type: file.type,
+        })
+
+        // 2. PUT directly to S3
+        setUploads(prev => prev.map(u => u.id === item.id ? { ...u, progress: 30 } : u))
+        const putRes = await fetch(upload_url, {
+          method:  'PUT',
+          headers: { 'Content-Type': file.type },
+          body:    file,
+        })
+        if (!putRes.ok) throw new Error('S3 upload failed')
+
+        setUploads(prev => prev.map(u => u.id === item.id ? { ...u, progress: 100, done: true } : u))
+        setImages(prev => [...prev, { id: image_id, url: image_url }])
+
+        // Auto-remove from upload list after a moment
+        setTimeout(() => setUploads(prev => prev.filter(u => u.id !== item.id)), 1500)
+      } catch (err) {
+        setUploads(prev => prev.map(u => u.id === item.id ? { ...u, error: err.message || 'Upload failed' } : u))
+      }
+    }
+  }
+
+  async function handleDelete(img) {
+    try {
+      await deleteImage(bikeId, img.id)
+      setImages(prev => prev.filter(i => i.id !== img.id))
+    } catch {
+      alert('Failed to delete image.')
+    }
+  }
+
+  function onDrop(e) {
+    e.preventDefault()
+    setDragging(false)
+    if (!disabled) handleFiles(e.dataTransfer.files)
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+      <h2 className="font-semibold text-gray-900">Media (Photos & Videos)</h2>
+
+      {disabled && (
+        <div className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
+          Save the bike first to add photos and videos.
+        </div>
+      )}
+
+      {/* Existing images grid */}
+      {images.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+          {images.map(img => (
+            <div key={img.id} className="relative group aspect-square rounded-lg overflow-hidden bg-gray-100 border border-gray-200">
+              {isVideo(img.url) ? (
+                <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
+                  <Film size={32} />
+                  <span className="text-xs mt-1">Video</span>
+                </div>
+              ) : (
+                <img
+                  src={img.url}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  onError={e => { e.target.style.display = 'none' }}
+                />
+              )}
+              <button
+                onClick={() => handleDelete(img)}
+                className="absolute top-1 right-1 p-1 bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Upload progress */}
+      {uploads.length > 0 && (
+        <div className="space-y-2">
+          {uploads.map(u => (
+            <div
+              key={u.id}
+              className={`rounded-lg border px-3 py-2 text-sm ${u.error ? 'border-red-200 bg-red-50 text-red-700' : 'border-gray-200 bg-gray-50'}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate flex-1">{u.file.name}</span>
+                {u.error && <X size={14} onClick={() => setUploads(p => p.filter(x => x.id !== u.id))} className="cursor-pointer shrink-0" />}
+                {u.done && <span className="text-green-600 text-xs">✓</span>}
+              </div>
+              {u.error && <p className="text-xs mt-0.5">{u.error}</p>}
+              {!u.error && !u.done && (
+                <div className="mt-1.5 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-pink-600 rounded-full transition-all" style={{ width: `${u.progress}%` }} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Drop zone */}
+      <div
+        onDragOver={e => { e.preventDefault(); if (!disabled) setDragging(true) }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        onClick={() => !disabled && fileRef.current?.click()}
+        className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center gap-2 transition-colors cursor-pointer
+          ${disabled ? 'border-gray-200 opacity-50 cursor-not-allowed' : dragging ? 'border-pink-400 bg-pink-50' : 'border-gray-300 hover:border-pink-400 hover:bg-pink-50'}`}
+      >
+        <Upload size={24} className="text-gray-400" />
+        <p className="text-sm font-medium text-gray-700">Drop files or tap to upload</p>
+        <p className="text-xs text-gray-400">JPG / JPEG, PNG, WebP, GIF, MP4, MOV · Images ≤ 10 MB · Videos ≤ 100 MB</p>
+      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        multiple
+        accept={ACCEPT_ATTR}
+        className="hidden"
+        onChange={e => handleFiles(e.target.files)}
+      />
+    </div>
+  )
+}
+
+// ── BikeForm ──────────────────────────────────────────────────────────────────
+
+export default function BikeForm() {
+  const { id }   = useParams()
+  const isEdit   = !!id
+  const navigate = useNavigate()
+  const qc       = useQueryClient()
+
+  const [form, setForm] = useState({
+    name: '', category_id: 1, description: '', base_price: '', msrp: '',
+    material: '', weight: '', model_year: new Date().getFullYear(),
+    featured: false, sold: false,
+  })
+  const [saving, setSaving]     = useState(false)
+  const [success, setSuccess]   = useState(false)
+  const [error, setError]       = useState('')
+
+  const { data: bikeData, isLoading } = useQuery({
+    queryKey: ['admin-bike', id],
+    queryFn:  () => getBike(id),
+    enabled:  isEdit,
+    staleTime: 0, // always fetch fresh when editing
+  })
+
+  // Depend on bikeData?.id (primitive) — avoids object reference staleness from cache
+  useEffect(() => {
+    if (!bikeData) return
+    setForm({
+      name:        bikeData.name        || '',
+      category_id: bikeData.category_id || 1,
+      description: bikeData.description || '',
+      base_price:  bikeData.base_price  || '',
+      msrp:        bikeData.msrp        || '',
+      material:    bikeData.material    || '',
+      weight:      bikeData.weight      || '',
+      model_year:  bikeData.model_year  || new Date().getFullYear(),
+      featured:    !!bikeData.featured,
+      sold:        !!bikeData.sold,
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bikeData?.id])
+
+  function setField(k, v) { setForm(f => ({ ...f, [k]: v })) }
+
+  async function handleSave() {
+    if (!form.name || !form.base_price) { setError('Name and base price are required.'); return }
+    setSaving(true); setError('')
+    try {
+      const payload = {
+        ...form,
+        base_price:  parseFloat(form.base_price),
+        msrp:        form.msrp ? parseFloat(form.msrp) : null,
+        category_id: parseInt(form.category_id),
+        model_year:  parseInt(form.model_year),
+        featured:    form.featured ? 1 : 0,
+        is_active:   1,
+        sold:        form.sold ? 1 : 0,
+      }
+      let bikeId = id
+      if (isEdit) {
+        await updateBike(id, payload)
+      } else {
+        const created = await createBike(payload)
+        bikeId = created.id
+      }
+      qc.invalidateQueries({ queryKey: ['admin-bikes'] })
+
+      // Show success state then redirect
+      setSuccess(true)
+      setTimeout(() => {
+        navigate('/admin/bikes')
+      }, 1200)
+    } catch (err) {
+      setError(err.message || 'Failed to save bike.')
+      setSaving(false)
+    }
+  }
+
+  if (isEdit && (isLoading || !bikeData)) return <div className="flex justify-center py-16"><Spinner /></div>
+
+  // Success overlay
+  if (success) {
+    return (
+      <div className="max-w-3xl">
+        <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center">
+          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <CheckCircle size={32} className="text-green-600" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">
+            {isEdit ? 'Bike Updated!' : 'Bike Created!'}
+          </h2>
+          <p className="text-gray-500">Redirecting to bikes list...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Get cover image (first image)
+  const coverImage = bikeData?.images?.[0]?.url
+
+  return (
+    <div className="max-w-3xl space-y-6">
+      <PageHeader
+        title={isEdit ? 'Edit Bike' : 'Add Bike'}
+        subtitle={isEdit ? form.name : 'Create a new product'}
+      >
+        <Button variant="secondary" onClick={() => navigate('/admin/bikes')}>Cancel</Button>
+        <Button onClick={handleSave} loading={saving}><Save size={16} /> Save</Button>
+      </PageHeader>
+
+      {/* Cover photo when editing */}
+      {isEdit && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-4">
+          <div className="w-20 h-20 rounded-lg overflow-hidden bg-gray-100 shrink-0 flex items-center justify-center">
+            {coverImage ? (
+              <img src={coverImage} alt={form.name} className="w-full h-full object-cover" />
+            ) : (
+              <Bike size={32} className="text-gray-300" />
+            )}
+          </div>
+          <div>
+            <p className="font-semibold text-gray-900">{form.name || 'Untitled Bike'}</p>
+            <p className="text-sm text-gray-500">
+              {bikeData?.images?.length || 0} photo{(bikeData?.images?.length || 0) !== 1 ? 's' : ''}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+
+      {/* Mark as Sold toggle */}
+      <div className={`rounded-xl border p-4 flex items-center justify-between ${form.sold ? 'bg-red-50 border-red-300' : 'bg-green-50 border-green-300'}`}>
+        <div>
+          <h2 className={`font-semibold ${form.sold ? 'text-red-800' : 'text-green-800'}`}>
+            {form.sold ? 'SOLD' : 'Available'}
+          </h2>
+          <p className={`text-sm ${form.sold ? 'text-red-600' : 'text-green-600'}`}>
+            {form.sold ? 'This bike has been sold' : 'This bike is available for purchase'}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setField('sold', !form.sold)}
+          className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 ${form.sold ? 'bg-red-600 focus:ring-red-500' : 'bg-green-600 focus:ring-green-500'}`}
+        >
+          <span className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${form.sold ? 'translate-x-0' : 'translate-x-5'}`} />
+        </button>
+      </div>
+
+      {/* Featured toggle */}
+      <div className={`rounded-xl border p-4 flex items-center justify-between ${form.featured ? 'bg-pink-50 border-pink-300' : 'bg-white border-gray-200'}`}>
+        <div>
+          <h2 className={`font-semibold ${form.featured ? 'text-pink-800' : 'text-gray-700'}`}>Featured</h2>
+          <p className={`text-sm ${form.featured ? 'text-pink-600' : 'text-gray-400'}`}>
+            {form.featured ? 'Shown on the homepage' : 'Not featured on homepage'}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setField('featured', !form.featured)}
+          className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 ${form.featured ? 'bg-pink-600 focus:ring-pink-500' : 'bg-gray-300 focus:ring-gray-400'}`}
+        >
+          <span className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${form.featured ? 'translate-x-5' : 'translate-x-0'}`} />
+        </button>
+      </div>
+
+      {/* Basic Info */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+        <h2 className="font-semibold text-gray-900">Basic Info</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+            <input value={form.name} onChange={e => setField('name', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="Enter the full bike name (brand + model)" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+            <select value={form.category_id} onChange={e => setField('category_id', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-pink-500">
+              {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Our Price *</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium text-sm">$</span>
+              <input type="number" min="0" step="0.01" value={form.base_price} onChange={e => setField('base_price', e.target.value)} className="w-full border border-gray-300 rounded-lg pl-7 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="Enter your asking price" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Original MSRP</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium text-sm">$</span>
+              <input type="number" min="0" step="0.01" value={form.msrp} onChange={e => setField('msrp', e.target.value)} className="w-full border border-gray-300 rounded-lg pl-7 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="Retail price when new (optional)" />
+            </div>
+            <p className="text-xs text-gray-400 mt-1">Shown crossed out to highlight savings</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Material</label>
+            <select value={form.material} onChange={e => setField('material', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-pink-500">
+              <option value="">Select frame material…</option>
+              {MATERIALS.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Model Year</label>
+            <input type="number" value={form.model_year} onChange={e => setField('model_year', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="Enter the model year" />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Weight</label>
+            <input value={form.weight} onChange={e => setField('weight', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="Enter weight (e.g. 8.2 kg / 18 lbs)" />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <textarea value={form.description} onChange={e => setField('description', e.target.value)} rows={3} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="Describe the bike's condition, components, and any notable details…" />
+          </div>
+        </div>
+      </div>
+
+      {/* Images / Videos */}
+      <ImageManager
+        bikeId={isEdit ? id : null}
+        initialImages={bikeData?.images || []}
+      />
+    </div>
+  )
+}

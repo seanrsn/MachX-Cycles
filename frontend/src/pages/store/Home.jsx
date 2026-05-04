@@ -1,0 +1,195 @@
+import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { Helmet } from 'react-helmet-async'
+import { ArrowRight, Bike, CheckCircle, Truck, Search, Shield, Headphones } from 'lucide-react'
+import { getBikes, getCategories } from '../../api/public'
+import Navbar from '../../components/store/Navbar'
+import Footer from '../../components/store/Footer'
+
+function BikeCard({ bike }) {
+  const img = bike.images?.[0]?.url || null
+  const price = bike.min_variant_price ?? bike.base_price
+  const msrp = bike.msrp
+  return (
+    <Link to={`/bikes/${bike.id}`} className="group bg-white rounded-2xl overflow-hidden border border-gray-200 hover:shadow-lg transition-all duration-200 hover:-translate-y-0.5">
+      <div className="aspect-[4/3] bg-gray-100 overflow-hidden relative">
+        {img
+          ? <img src={img} alt={bike.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+          : <div className="w-full h-full flex items-center justify-center"><Bike size={48} className="text-gray-300" /></div>
+        }
+        <span className="absolute top-3 left-3 bg-pink-600 text-white text-xs font-bold px-2 py-1 rounded">PRE-OWNED</span>
+      </div>
+      <div className="p-4">
+        <span className="text-xs font-medium text-pink-600 uppercase tracking-wide">{bike.category_name}</span>
+        <h3 className="font-semibold text-gray-900 mt-0.5 truncate">{bike.name}</h3>
+        <div className="mt-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-gray-900">${parseFloat(price).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+            {msrp && parseFloat(msrp) > parseFloat(price) && (
+              <span className="text-sm text-gray-400 line-through">${parseFloat(msrp).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+            )}
+          </div>
+          <span className="text-pink-600 group-hover:translate-x-1 transition-transform">
+            <ArrowRight size={16} />
+          </span>
+        </div>
+      </div>
+    </Link>
+  )
+}
+
+export default function Home() {
+  const { data: featuredData } = useQuery({ queryKey: ['public-featured'], queryFn: () => getBikes({ featured: 1, limit: 8 }) })
+  const { data: categoriesData } = useQuery({ queryKey: ['public-categories'], queryFn: getCategories })
+
+  const bikes      = featuredData?.bikes || []
+  const categories = categoriesData?.categories || []
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Helmet>
+        <title>MachX Cycles | Premium Pre-Owned Performance Bikes</title>
+        <meta name="description" content="Shop premium pre-owned road, mountain, and e-bikes at unbeatable prices. Every bike inspected, certified, and ships ride-ready. Premium performance without the premium price tag." />
+        <link rel="canonical" href="https://machxcycles.com/" />
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "Organization",
+            "name": "MachX Cycles",
+            "url": "https://machxcycles.com",
+            "logo": "https://machxcycles.com/logo.png",
+            "description": "Premium pre-owned performance bikes at unbeatable prices",
+            "sameAs": []
+          })}
+        </script>
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "WebSite",
+            "name": "MachX Cycles",
+            "url": "https://machxcycles.com"
+          })}
+        </script>
+      </Helmet>
+      <Navbar />
+
+      {/* Hero */}
+      <div className="relative bg-gray-950 text-white overflow-hidden">
+        <div className="absolute inset-0 opacity-20"
+          style={{ backgroundImage: 'radial-gradient(ellipse at 70% 50%, #e91e8c 0%, transparent 60%)' }} />
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 sm:py-32">
+          <div className="max-w-2xl">
+            <p className="text-pink-400 font-semibold text-sm uppercase tracking-widest mb-4">Premium Pre-Owned</p>
+            <h1 className="text-5xl sm:text-6xl font-black leading-tight mb-6">
+              Ride Beyond<br />
+              <span className="text-pink-500">Your Limits</span>
+            </h1>
+            <p className="text-gray-400 text-lg mb-8 leading-relaxed">
+              Premium performance without the premium price tag. Top-tier bikes from Trek, Specialized, and Cannondale — inspected, tuned, and ships ride-ready.
+            </p>
+            <div className="flex flex-wrap gap-4">
+              <Link to="/shop" className="inline-flex items-center gap-2 bg-pink-600 hover:bg-pink-700 text-white px-8 py-3.5 rounded-xl font-semibold transition-colors">
+                Shop Now <ArrowRight size={18} />
+              </Link>
+              <Link to="/track-order" className="inline-flex items-center gap-2 border border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white px-8 py-3.5 rounded-xl font-semibold transition-colors">
+                Track Order
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Value props */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            {[
+              { icon: Search, title: 'Inspected & Certified', sub: 'Multi-point quality check' },
+              { icon: Shield, title: 'Secure Checkout', sub: 'Encrypted & protected' },
+              { icon: Headphones, title: 'Expert Support', sub: 'Real people, fast replies' },
+            ].map(({ icon: Icon, title, sub }) => (
+              <div key={title} className="flex items-center gap-3">
+                <div className="p-2 bg-pink-50 rounded-lg"><Icon size={20} className="text-pink-600" /></div>
+                <div>
+                  <p className="font-semibold text-gray-900 text-sm">{title}</p>
+                  <p className="text-gray-500 text-xs">{sub}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Categories */}
+      {categories.length > 0 && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <h2 className="text-2xl font-bold text-gray-900 mb-6">Shop by Category</h2>
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+            <Link to="/shop" className="shrink-0 px-5 py-2.5 rounded-full border-2 border-pink-600 text-pink-600 font-semibold text-sm hover:bg-pink-600 hover:text-white transition-colors">All</Link>
+            {categories.map(c => (
+              <Link key={c.id} to={`/shop?category=${c.id}`} className="shrink-0 px-5 py-2.5 rounded-full border border-gray-300 text-gray-700 font-medium text-sm hover:border-pink-600 hover:text-pink-600 transition-colors">
+                {c.name}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Featured bikes */}
+      {bikes.length > 0 && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-gray-900">Just Arrived</h2>
+            <Link to="/shop" className="text-pink-600 font-medium text-sm hover:text-pink-700 flex items-center gap-1">
+              View all <ArrowRight size={14} />
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {bikes.map(b => <BikeCard key={b.id} bike={b} />)}
+          </div>
+        </div>
+      )}
+
+      {/* The MachX Difference */}
+      <div className="bg-white border-t border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+          <h2 className="text-3xl font-black text-gray-900 text-center mb-4">The MachX Difference</h2>
+          <p className="text-gray-500 text-center max-w-2xl mx-auto mb-12">
+            Every bike is hand-selected, professionally inspected, and tuned before it ships.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div className="text-center">
+              <div className="text-4xl font-black text-pink-600 mb-2">Save Big</div>
+              <p className="font-semibold text-gray-900">Premium Brands</p>
+              <p className="text-gray-500 text-sm mt-1">Trek, Specialized, Cannondale & more</p>
+            </div>
+            <div className="text-center">
+              <div className="text-4xl font-black text-pink-600 mb-2">Free</div>
+              <p className="font-semibold text-gray-900">Shipping</p>
+              <p className="text-gray-500 text-sm mt-1">Nationwide delivery included</p>
+            </div>
+            <div className="text-center">
+              <div className="text-4xl font-black text-pink-600 mb-2">30 Days</div>
+              <p className="font-semibold text-gray-900">Returns</p>
+              <p className="text-gray-500 text-sm mt-1">Shop with confidence</p>
+              <Link to="/support" className="text-pink-600 text-xs hover:underline mt-1 inline-block">(See return policy)</Link>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* CTA */}
+      <div className="bg-gray-950 text-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
+          <h2 className="text-3xl font-black mb-4">Ready to save?</h2>
+          <p className="text-gray-400 mb-8">Browse our selection of certified pre-owned bikes.</p>
+          <Link to="/shop" className="inline-flex items-center gap-2 bg-pink-600 hover:bg-pink-700 text-white px-8 py-3.5 rounded-xl font-semibold transition-colors">
+            Shop All Bikes <ArrowRight size={18} />
+          </Link>
+        </div>
+      </div>
+
+      <Footer />
+    </div>
+  )
+}

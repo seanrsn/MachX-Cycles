@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Prevent iOS auto-zoom on input focus (requires font-size >= 16px) */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  @media (min-width: 640px) {
+    input,
+    select,
+    textarea {
+      font-size: 14px;
+    }
+  }
+}
+
+/* Native momentum scrolling on iOS */
+* {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent double-tap zoom, keep scroll */
+a, button, input, select, textarea, label {
+  touch-action: manipulation;
+}
+
+/* Image gallery slide animations */
+@keyframes slideInFromRight {
+  from { transform: translateX(48px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes slideInFromLeft {
+  from { transform: translateX(-48px); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+.img-slide-right {
+  animation: slideInFromRight 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.img-slide-left {
+  animation: slideInFromLeft 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}

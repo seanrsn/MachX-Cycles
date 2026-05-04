@@ -1,0 +1,137 @@
+{
+    "CallerReference":  "machx-cycles-2026-02-23",
+    "Aliases":  {
+                    "Quantity":  2,
+                    "Items":  [
+                                  "www.machxcycles.com",
+                                  "machxcycles.com"
+                              ]
+                },
+    "DefaultRootObject":  "index.html",
+    "Origins":  {
+                    "Quantity":  1,
+                    "Items":  [
+                                  {
+                                      "Id":  "S3-machx-cycles-frontend",
+                                      "DomainName":  "machx-cycles-frontend.s3-website-us-east-1.amazonaws.com",
+                                      "OriginPath":  "",
+                                      "CustomHeaders":  {
+                                                            "Quantity":  0
+                                                        },
+                                      "CustomOriginConfig":  {
+                                                                 "HTTPPort":  80,
+                                                                 "HTTPSPort":  443,
+                                                                 "OriginProtocolPolicy":  "http-only",
+                                                                 "OriginSslProtocols":  {
+                                                                                            "Quantity":  1,
+                                                                                            "Items":  [
+                                                                                                          "TLSv1.2"
+                                                                                                      ]
+                                                                                        },
+                                                                 "OriginReadTimeout":  30,
+                                                                 "OriginKeepaliveTimeout":  5
+                                                             },
+                                      "ConnectionAttempts":  3,
+                                      "ConnectionTimeout":  10,
+                                      "OriginShield":  {
+                                                           "Enabled":  false
+                                                       },
+                                      "OriginAccessControlId":  ""
+                                  }
+                              ]
+                },
+    "OriginGroups":  {
+                         "Quantity":  0
+                     },
+    "DefaultCacheBehavior":  {
+                                 "TargetOriginId":  "S3-machx-cycles-frontend",
+                                 "TrustedSigners":  {
+                                                        "Enabled":  false,
+                                                        "Quantity":  0
+                                                    },
+                                 "TrustedKeyGroups":  {
+                                                          "Enabled":  false,
+                                                          "Quantity":  0
+                                                      },
+                                 "ViewerProtocolPolicy":  "redirect-to-https",
+                                 "AllowedMethods":  {
+                                                        "Quantity":  2,
+                                                        "Items":  [
+                                                                      "HEAD",
+                                                                      "GET"
+                                                                  ],
+                                                        "CachedMethods":  {
+                                                                              "Quantity":  2,
+                                                                              "Items":  [
+                                                                                            "HEAD",
+                                                                                            "GET"
+                                                                                        ]
+                                                                          }
+                                                    },
+                                 "SmoothStreaming":  false,
+                                 "Compress":  true,
+                                 "LambdaFunctionAssociations":  {
+                                                                    "Quantity":  0
+                                                                },
+                                 "FunctionAssociations":  {
+                                                              "Quantity":  1,
+                                                              "Items":  [
+                                                                            {
+                                                                                "FunctionARN":  "arn:aws:cloudfront::807373873973:function/machx-www-redirect",
+                                                                                "EventType":  "viewer-request"
+                                                                            }
+                                                                        ]
+                                                          },
+                                 "FieldLevelEncryptionId":  "",
+                                 "CachePolicyId":  "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+                                 "OriginRequestPolicyId":  "88a5eaf4-2fd4-4709-b370-b4c650ea3fcf"
+                             },
+    "CacheBehaviors":  {
+                           "Quantity":  0
+                       },
+    "CustomErrorResponses":  {
+                                 "Quantity":  2,
+                                 "Items":  [
+                                               {
+                                                   "ErrorCode":  403,
+                                                   "ResponsePagePath":  "/index.html",
+                                                   "ResponseCode":  "200",
+                                                   "ErrorCachingMinTTL":  10
+                                               },
+                                               {
+                                                   "ErrorCode":  404,
+                                                   "ResponsePagePath":  "/index.html",
+                                                   "ResponseCode":  "200",
+                                                   "ErrorCachingMinTTL":  10
+                                               }
+                                           ]
+                             },
+    "Comment":  "MachX Cycles storefront",
+    "Logging":  {
+                    "Enabled":  false,
+                    "IncludeCookies":  false,
+                    "Bucket":  "",
+                    "Prefix":  ""
+                },
+    "PriceClass":  "PriceClass_100",
+    "Enabled":  true,
+    "ViewerCertificate":  {
+                              "CloudFrontDefaultCertificate":  false,
+                              "ACMCertificateArn":  "arn:aws:acm:us-east-1:807373873973:certificate/1c829811-8ca1-442e-a53f-e17b5651b56b",
+                              "SSLSupportMethod":  "sni-only",
+                              "MinimumProtocolVersion":  "TLSv1.2_2021",
+                              "Certificate":  "arn:aws:acm:us-east-1:807373873973:certificate/1c829811-8ca1-442e-a53f-e17b5651b56b",
+                              "CertificateSource":  "acm"
+                          },
+    "Restrictions":  {
+                         "GeoRestriction":  {
+                                                "RestrictionType":  "none",
+                                                "Quantity":  0
+                                            }
+                     },
+    "WebACLId":  "",
+    "HttpVersion":  "http2and3",
+    "IsIPV6Enabled":  true,
+    "ContinuousDeploymentPolicyId":  "",
+    "Staging":  false
+}
