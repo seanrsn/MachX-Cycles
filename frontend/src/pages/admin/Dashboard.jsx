@@ -31,7 +31,10 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+        <p className="text-pink-600 text-[11px] font-bold uppercase tracking-[0.22em] mb-1.5">Overview</p>
+        <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
+          <span className="mx-gradient-text">Dashboard</span>
+        </h1>
         <p className="text-sm text-gray-500 mt-1">Welcome back. Here's what's happening today.</p>
       </div>
 
@@ -41,32 +44,32 @@ export default function Dashboard() {
           label="Today's Orders"
           value={d.today_orders ?? 0}
           icon={ShoppingBag}
-          color="blue"
+          color="gradient"
         />
         <StatCard
           label="Today's Revenue"
           value={fmt(d.today_revenue)}
           icon={DollarSign}
-          color="green"
+          color="pink"
         />
         <StatCard
           label="Month Orders"
           value={d.month_orders ?? 0}
           icon={TrendingUp}
-          color="pink"
+          color="accent"
         />
         <StatCard
           label="Month Revenue"
           value={fmt(d.month_revenue)}
           icon={DollarSign}
-          color="yellow"
+          color="pink"
         />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Orders by status */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h2 className="text-sm font-semibold text-gray-700 mb-4">Orders by Status</h2>
+        <div className="bg-white rounded-xl ring-1 ring-gray-200/70 p-6 shadow-sm">
+          <h2 className="text-sm font-bold text-gray-900 mb-4 tracking-tight">Orders by Status</h2>
           {Object.keys(statuses).length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-8">No orders yet</p>
           ) : (
@@ -82,8 +85,8 @@ export default function Dashboard() {
         </div>
 
         {/* Recent orders */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h2 className="text-sm font-semibold text-gray-700 mb-4">Recent Orders</h2>
+        <div className="bg-white rounded-xl ring-1 ring-gray-200/70 p-6 shadow-sm">
+          <h2 className="text-sm font-bold text-gray-900 mb-4 tracking-tight">Recent Orders</h2>
           {!d.recent_orders?.length ? (
             <p className="text-sm text-gray-400 text-center py-8">No orders yet</p>
           ) : (

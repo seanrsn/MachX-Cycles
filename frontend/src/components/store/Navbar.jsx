@@ -39,11 +39,11 @@ export default function Navbar() {
                   <Link
                     key={link.href}
                     to={link.href}
-                    className={`relative text-base font-medium transition-colors hover:text-white ${
-                      active ? 'text-white' : 'text-gray-300'
+                    className={`relative text-base font-semibold transition-colors ${
+                      active ? '' : 'text-gray-300 hover:text-white'
                     }`}
                   >
-                    {link.label}
+                    <span className={active ? 'mx-gradient-text' : ''}>{link.label}</span>
                     {active && (
                       <span className="absolute -bottom-1.5 left-0 right-0 h-0.5 mx-gradient-bg rounded-full" />
                     )}

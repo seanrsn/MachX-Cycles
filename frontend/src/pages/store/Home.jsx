@@ -175,9 +175,7 @@ export default function Home() {
               { icon: RotateCcw, stat: '30 Days',  label: 'Easy Returns',        sub: 'Shop with confidence', link: true },
             ].map(({ icon: Icon, stat, label, sub, link }) => (
               <div key={label} className="bg-white/[0.04] border border-white/10 rounded-2xl p-7 hover:bg-white/[0.06] hover:border-pink-500/30 transition-all duration-300">
-                <div className="w-12 h-12 rounded-xl mx-gradient-bg flex items-center justify-center mb-5 shadow-lg shadow-pink-900/40">
-                  <Icon size={22} className="text-white" strokeWidth={2.25} />
-                </div>
+                <Icon size={22} className="text-pink-400 mb-5" strokeWidth={1.75} />
                 <div className="text-4xl font-black mx-gradient-text mb-1 leading-none pb-1">{stat}</div>
                 <p className="font-semibold text-white text-base">{label}</p>
                 <p className="text-gray-400 text-sm mt-1">{sub}</p>
