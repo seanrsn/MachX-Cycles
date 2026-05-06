@@ -150,16 +150,21 @@ export default function Home() {
         </div>
       )}
 
-      {/* The MachX Difference */}
+      {/* Dark zone — Difference + CTA flow as one continuous section into the footer */}
       <div className="relative overflow-hidden text-white" style={{ background: '#0a0a0f' }}>
+        {/* Ambient backdrop glow — reads through both Difference and CTA */}
         <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-0 left-1/3 w-[700px] h-[400px]"
-            style={{ background: 'radial-gradient(ellipse, rgba(236,72,153,0.15) 0%, transparent 70%)' }} />
-          <div className="absolute bottom-0 right-1/4 w-[600px] h-[300px]"
-            style={{ background: 'radial-gradient(ellipse, rgba(249,115,22,0.10) 0%, transparent 70%)' }} />
+          <div className="absolute top-0 left-1/3 w-[800px] h-[500px]"
+            style={{ background: 'radial-gradient(ellipse, rgba(236,72,153,0.18) 0%, transparent 70%)' }} />
+          <div className="absolute top-1/2 right-0 w-[700px] h-[500px]"
+            style={{ background: 'radial-gradient(ellipse, rgba(249,115,22,0.12) 0%, transparent 70%)' }} />
         </div>
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-          <h2 className="text-3xl sm:text-4xl font-black text-white text-center mb-4">The MachX Difference</h2>
+
+        {/* The MachX Difference */}
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
+          <h2 className="text-3xl sm:text-4xl font-black text-white text-center mb-4">
+            The MachX <span className="mx-gradient-text">Difference</span>
+          </h2>
           <p className="text-gray-400 text-center max-w-2xl mx-auto mb-12">
             Every bike is hand-selected, professionally inspected, and tuned before it ships.
           </p>
@@ -173,7 +178,7 @@ export default function Home() {
                 <div className="w-12 h-12 rounded-xl mx-gradient-bg flex items-center justify-center mb-5 shadow-lg shadow-pink-900/40">
                   <Icon size={22} className="text-white" strokeWidth={2.25} />
                 </div>
-                <div className="text-4xl font-black mx-gradient-text mb-1">{stat}</div>
+                <div className="text-4xl font-black mx-gradient-text mb-1 leading-none pb-1">{stat}</div>
                 <p className="font-semibold text-white text-base">{label}</p>
                 <p className="text-gray-400 text-sm mt-1">{sub}</p>
                 {link && (
@@ -185,20 +190,22 @@ export default function Home() {
             ))}
           </div>
         </div>
-      </div>
 
-      {/* CTA */}
-      <div className="relative mx-gradient-bg text-white overflow-hidden">
-        <div className="absolute inset-0 opacity-[0.07] pointer-events-none"
-          style={{ backgroundImage: 'radial-gradient(circle, #fff 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
-        <div className="absolute top-0 right-0 w-72 h-72 opacity-25 rounded-full pointer-events-none"
-          style={{ background: 'radial-gradient(circle, #fff 0%, transparent 70%)', transform: 'translate(35%, -35%)' }} />
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
-          <h2 className="text-3xl font-black mb-4">Ready to save?</h2>
-          <p className="text-pink-100/90 mb-8">Browse our selection of certified pre-owned bikes.</p>
-          <Link to="/shop" className="inline-flex items-center gap-2 bg-white text-pink-600 hover:bg-pink-50 px-8 py-3.5 rounded-xl font-semibold transition-colors shadow-xl">
-            Shop All Bikes <ArrowRight size={18} />
-          </Link>
+        {/* CTA — contained gradient card, lives inside the same dark zone */}
+        <div className="relative max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pb-20">
+          <div className="relative mx-gradient-bg rounded-2xl p-10 sm:p-14 text-center overflow-hidden shadow-2xl shadow-pink-900/40">
+            <div className="absolute inset-0 opacity-[0.07] pointer-events-none"
+              style={{ backgroundImage: 'radial-gradient(circle, #fff 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
+            <div className="absolute top-0 right-0 w-72 h-72 opacity-25 rounded-full pointer-events-none"
+              style={{ background: 'radial-gradient(circle, #fff 0%, transparent 70%)', transform: 'translate(35%, -35%)' }} />
+            <div className="relative">
+              <h2 className="text-3xl sm:text-4xl font-black mb-4 tracking-tight">Ready to save?</h2>
+              <p className="text-pink-100/90 mb-8 text-base sm:text-lg">Browse our selection of certified pre-owned bikes.</p>
+              <Link to="/shop" className="inline-flex items-center gap-2 bg-white text-pink-600 hover:bg-pink-50 px-8 py-3.5 rounded-xl font-semibold transition-colors shadow-xl">
+                Shop All Bikes <ArrowRight size={18} />
+              </Link>
+            </div>
+          </div>
         </div>
       </div>
 
