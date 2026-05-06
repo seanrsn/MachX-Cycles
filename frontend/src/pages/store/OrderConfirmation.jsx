@@ -141,8 +141,13 @@ export default function OrderConfirmation() {
     <div className="min-h-screen bg-gray-50">
       <Navbar />
       <div className="max-w-lg mx-auto px-4 py-16 text-center">
-        <CheckCircle size={64} className="mx-auto text-green-500 mb-6" />
-        <h1 className="text-3xl font-black text-gray-900 mb-2">Payment Confirmed!</h1>
+        <div className="w-20 h-20 mx-auto mb-6 rounded-full mx-gradient-bg flex items-center justify-center shadow-xl shadow-pink-900/30">
+          <CheckCircle size={36} className="text-white" strokeWidth={2.25} />
+        </div>
+        <p className="text-pink-600 text-[11px] font-bold uppercase tracking-[0.22em] mb-2">Order Placed</p>
+        <h1 className="text-3xl sm:text-4xl font-black text-gray-900 mb-2 tracking-tight">
+          <span className="mx-gradient-text">Payment confirmed.</span>
+        </h1>
         {order?.order_number && (
           <p className="text-gray-500 mb-1">
             Order <span className="font-semibold text-gray-800">{order.order_number}</span>
@@ -154,17 +159,17 @@ export default function OrderConfirmation() {
           </p>
         )}
 
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 text-left mb-8 space-y-3 text-sm text-gray-700">
+        <div className="bg-white rounded-2xl ring-1 ring-gray-200/80 p-6 text-left mb-8 space-y-3 text-sm text-gray-700 shadow-sm">
           <div className="flex items-start gap-3">
-            <CheckCircle size={16} className="text-green-500 mt-0.5 shrink-0" />
+            <CheckCircle size={16} className="text-pink-500 mt-0.5 shrink-0" />
             <span>Your payment was processed successfully</span>
           </div>
           <div className="flex items-start gap-3">
-            <Mail size={16} className="text-pink-600 mt-0.5 shrink-0" />
+            <Mail size={16} className="text-pink-500 mt-0.5 shrink-0" />
             <span>A confirmation email is on its way to you</span>
           </div>
           <div className="flex items-start gap-3">
-            <CheckCircle size={16} className="text-green-500 mt-0.5 shrink-0" />
+            <CheckCircle size={16} className="text-pink-500 mt-0.5 shrink-0" />
             <span>Your order is now being processed</span>
           </div>
         </div>

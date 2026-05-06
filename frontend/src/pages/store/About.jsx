@@ -1,5 +1,6 @@
 import { Helmet } from 'react-helmet-async'
-import { Search, DollarSign, Users, CheckCircle } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Search, DollarSign, Users, CheckCircle, ArrowRight } from 'lucide-react'
 import Navbar from '../../components/store/Navbar'
 import Footer from '../../components/store/Footer'
 
@@ -166,9 +167,11 @@ export default function About() {
               </div>
             ))}
           </div>
-          <p className="text-gray-500 text-xs mt-10 text-center">
-            * Returns subject to 15% restocking fee. Customer covers return shipping. See Support page for full details.
-          </p>
+          <div className="mt-10 text-center">
+            <Link to="/support" className="inline-flex items-center gap-1.5 text-pink-400 hover:text-pink-300 text-sm font-semibold transition-colors">
+              See full return policy <ArrowRight size={14} />
+            </Link>
+          </div>
         </div>
       </section>
 

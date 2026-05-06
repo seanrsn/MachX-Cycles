@@ -38,12 +38,17 @@ export default function OrderLookup() {
       <Navbar />
       <div className="max-w-lg mx-auto px-4 py-12">
         <div className="text-center mb-8">
-          <Package size={40} className="mx-auto text-pink-600 mb-3" />
-          <h1 className="text-2xl font-bold text-gray-900">Track Your Order</h1>
-          <p className="text-gray-500 mt-1">Enter your email and order number to check status</p>
+          <div className="w-14 h-14 mx-auto mb-4 rounded-2xl mx-gradient-bg flex items-center justify-center shadow-lg shadow-pink-900/20">
+            <Package size={24} className="text-white" strokeWidth={2.25} />
+          </div>
+          <p className="text-pink-600 text-[11px] font-bold uppercase tracking-[0.22em] mb-2">Track Order</p>
+          <h1 className="text-3xl sm:text-4xl font-black text-gray-900 tracking-tight">
+            Find your <span className="mx-gradient-text">ride.</span>
+          </h1>
+          <p className="text-gray-500 mt-2">Enter your email and order number to check status.</p>
         </div>
 
-        <form onSubmit={handleLookup} className="bg-white rounded-2xl border border-gray-200 p-6 space-y-4">
+        <form onSubmit={handleLookup} className="bg-white rounded-2xl ring-1 ring-gray-200/80 p-6 space-y-4 shadow-sm">
           {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
@@ -76,7 +81,7 @@ export default function OrderLookup() {
 
         {/* Order result */}
         {order && (
-          <div className="mt-6 bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="mt-6 bg-white rounded-2xl ring-1 ring-gray-200/80 overflow-hidden shadow-sm">
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <div>
                 <p className="font-bold text-gray-900">{order.order_number}</p>

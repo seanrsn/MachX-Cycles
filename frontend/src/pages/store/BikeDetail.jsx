@@ -268,6 +268,9 @@ export default function BikeDetail() {
   const savings = bike.msrp && parseFloat(bike.msrp) > parseFloat(price)
     ? parseFloat(bike.msrp) - parseFloat(price)
     : null
+  const savingsPct = savings
+    ? Math.round((savings / parseFloat(bike.msrp)) * 100)
+    : null
 
   function handleAddToCart() {
     if (!inStock) return
@@ -409,12 +412,7 @@ if (bike.model_year) specs.push({ icon: Calendar, label: 'Year', value: bike.mod
               {/* Category & Status */}
               <div className="flex items-center gap-3 mb-3">
                 <span className="text-sm font-semibold text-pink-600 uppercase tracking-wider">{bike.category_name}</span>
-                {inStock ? (
-                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 px-2.5 py-1 rounded-full">
-                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
-                    Available
-                  </span>
-                ) : (
+                {!inStock && (
                   <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 bg-red-50 px-2.5 py-1 rounded-full">
                     Sold
                   </span>
@@ -436,8 +434,11 @@ if (bike.model_year) specs.push({ icon: Calendar, label: 'Year', value: bike.mod
                 )}
               </div>
               {savings && (
-                <p className="mt-1 text-green-600 font-medium">
-                  You save ${savings.toLocaleString('en-US', { minimumFractionDigits: 2 })} vs. buying new
+                <p className="mt-2 text-sm font-semibold">
+                  <span className="mx-gradient-text">
+                    You save ${savings.toLocaleString('en-US', { minimumFractionDigits: 2 })} ({savingsPct}%)
+                  </span>
+                  <span className="text-gray-500 font-medium"> vs. buying new</span>
                 </p>
               )}
               

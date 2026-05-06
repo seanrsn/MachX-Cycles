@@ -78,15 +78,21 @@ export default function Contact() {
       <Navbar />
 
       {/* Hero */}
-      <section className="bg-gray-950 text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-20">
+      <section className="relative text-white overflow-hidden" style={{ background: '#0a0a0f' }}>
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute -top-40 -right-32 w-[700px] h-[700px] rounded-full opacity-25"
+            style={{ background: 'radial-gradient(circle, #ec4899 0%, transparent 60%)' }} />
+          <div className="absolute top-1/3 -right-72 w-[500px] h-[500px] rounded-full opacity-20"
+            style={{ background: 'radial-gradient(circle, #f97316 0%, transparent 65%)' }} />
+        </div>
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24">
           <div className="max-w-2xl">
             <p className="text-pink-400 font-semibold text-sm uppercase tracking-widest mb-4">Get In Touch</p>
-            <h1 className="text-4xl sm:text-5xl font-black leading-tight mb-4">
-              Let's talk bikes.
+            <h1 className="text-4xl sm:text-5xl font-black leading-tight mb-4 tracking-tight">
+              Let's <span className="mx-gradient-text">talk bikes.</span>
             </h1>
             <p className="text-gray-400 text-lg">
-              Questions about a build? Need sizing advice? Just want to geek out about gear ratios? 
+              Questions about a build? Need sizing advice? Just want to geek out about gear ratios?
               We're always happy to chat.
             </p>
           </div>
@@ -97,25 +103,20 @@ export default function Contact() {
         <div className="grid lg:grid-cols-2 gap-12">
           {/* Contact info */}
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Find Us</h2>
+            <p className="text-pink-600 text-[11px] font-bold uppercase tracking-[0.22em] mb-2">Find Us</p>
+            <h2 className="text-2xl sm:text-3xl font-black text-gray-900 mb-6 tracking-tight">Drop by, call, or write.</h2>
             <div className="grid sm:grid-cols-2 gap-4 mb-8">
               {CONTACT_INFO.map(({ icon: Icon, label, value, sub, href }) => (
                 <a
                   key={label}
                   href={href || '#'}
-                  className={`bg-white rounded-xl border border-gray-200 p-5 transition-all ${href ? 'hover:border-pink-300 hover:shadow-md' : ''}`}
+                  className={`bg-white rounded-2xl ring-1 ring-gray-200/80 p-5 transition-all duration-300 ${href ? 'hover:ring-pink-200 hover:shadow-xl hover:shadow-pink-100/40 hover:-translate-y-0.5' : ''}`}
                   {...(!href && { onClick: e => e.preventDefault() })}
                 >
-                  <div className="flex items-start gap-4">
-                    <div className="p-2.5 bg-pink-100 text-pink-600 rounded-lg shrink-0">
-                      <Icon size={20} />
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">{label}</p>
-                      <p className="font-semibold text-gray-900">{value}</p>
-                      {sub && <p className="text-sm text-gray-500 mt-0.5">{sub}</p>}
-                    </div>
-                  </div>
+                  <Icon size={20} className="text-pink-500 mb-3" strokeWidth={1.75} />
+                  <p className="text-[10px] text-gray-400 uppercase tracking-[0.18em] font-bold mb-1">{label}</p>
+                  <p className="font-bold text-gray-900">{value}</p>
+                  {sub && <p className="text-sm text-gray-500 mt-0.5">{sub}</p>}
                 </a>
               ))}
             </div>
@@ -137,23 +138,26 @@ export default function Contact() {
 
           {/* Contact form */}
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Send a Message</h2>
+            <p className="text-pink-600 text-[11px] font-bold uppercase tracking-[0.22em] mb-2">Reach Out</p>
+            <h2 className="text-2xl sm:text-3xl font-black text-gray-900 mb-6 tracking-tight">Send a <span className="mx-gradient-text">message.</span></h2>
             {sent ? (
-              <div className="bg-green-50 border border-green-200 rounded-xl p-8 text-center">
-                <div className="text-4xl mb-4">✓</div>
-                <p className="font-semibold text-gray-900 mb-2">Message sent!</p>
+              <div className="bg-white rounded-2xl ring-1 ring-pink-200 p-8 text-center shadow-xl shadow-pink-100/40">
+                <div className="w-14 h-14 mx-auto mb-4 rounded-full mx-gradient-bg flex items-center justify-center shadow-lg shadow-pink-900/20">
+                  <Send size={22} className="text-white" strokeWidth={2.25} />
+                </div>
+                <p className="font-bold text-gray-900 mb-2 text-lg">Message sent!</p>
                 <p className="text-gray-600 text-sm">
                   We've received your message and will get back to you within 24 hours.
                 </p>
                 <button
                   onClick={() => setSent(false)}
-                  className="mt-4 text-pink-600 font-medium text-sm hover:underline"
+                  className="mt-4 text-pink-600 font-semibold text-sm hover:text-pink-700"
                 >
                   Send another message
                 </button>
               </div>
             ) : (
-              <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
+              <form onSubmit={handleSubmit} className="bg-white rounded-2xl ring-1 ring-gray-200/80 p-6 space-y-5 shadow-sm">
                 <div className="grid sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Your Name</label>
