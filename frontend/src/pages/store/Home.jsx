@@ -11,7 +11,7 @@ function BikeCard({ bike }) {
   const price = bike.min_variant_price ?? bike.base_price
   const msrp = bike.msrp
   return (
-    <Link to={`/bikes/${bike.id}`} className="group bg-white rounded-2xl overflow-hidden border border-gray-200 hover:shadow-lg transition-all duration-200 hover:-translate-y-0.5">
+    <Link to={`/bikes/${bike.id}`} className="group bg-white rounded-2xl overflow-hidden ring-1 ring-gray-200/80 hover:ring-pink-200 hover:shadow-xl hover:shadow-pink-100/40 transition-all duration-300 hover:-translate-y-1">
       <div className="aspect-[4/3] bg-gray-100 overflow-hidden relative">
         {img
           ? <img src={img} alt={bike.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
@@ -75,20 +75,20 @@ export default function Home() {
 
       {/* Hero */}
       <div className="relative bg-gray-950 text-white overflow-hidden">
-        <div className="absolute inset-0 opacity-20"
-          style={{ backgroundImage: 'radial-gradient(ellipse at 70% 50%, #e91e8c 0%, transparent 60%)' }} />
+        <div className="absolute inset-0 opacity-25"
+          style={{ backgroundImage: 'radial-gradient(ellipse at 75% 50%, #ec4899 0%, transparent 55%), radial-gradient(ellipse at 95% 90%, #f97316 0%, transparent 60%)' }} />
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 sm:py-32">
           <div className="max-w-2xl">
             <p className="text-pink-400 font-semibold text-sm uppercase tracking-widest mb-4">Premium Pre-Owned</p>
             <h1 className="text-5xl sm:text-6xl font-black leading-tight mb-6">
               Ride Beyond<br />
-              <span className="text-pink-500">Your Limits</span>
+              <span className="mx-gradient-text">Your Limits</span>
             </h1>
             <p className="text-gray-400 text-lg mb-8 leading-relaxed">
               Premium performance without the premium price tag. Top-tier bikes from Trek, Specialized, and Cannondale — inspected, tuned, and ships ride-ready.
             </p>
             <div className="flex flex-wrap gap-4">
-              <Link to="/shop" className="inline-flex items-center gap-2 bg-pink-600 hover:bg-pink-700 text-white px-8 py-3.5 rounded-xl font-semibold transition-colors">
+              <Link to="/shop" className="mx-gradient-btn inline-flex items-center gap-2 text-white px-8 py-3.5 rounded-xl font-semibold shadow-lg shadow-pink-900/40 hover:shadow-pink-900/60 hover:-translate-y-0.5">
                 Shop Now <ArrowRight size={18} />
               </Link>
               <Link to="/track-order" className="inline-flex items-center gap-2 border border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white px-8 py-3.5 rounded-xl font-semibold transition-colors">
@@ -159,17 +159,17 @@ export default function Home() {
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <div className="text-center">
-              <div className="text-4xl font-black text-pink-600 mb-2">Save Big</div>
+              <div className="text-4xl font-black mx-gradient-text mb-2">Save Big</div>
               <p className="font-semibold text-gray-900">Premium Brands</p>
               <p className="text-gray-500 text-sm mt-1">Trek, Specialized, Cannondale & more</p>
             </div>
             <div className="text-center">
-              <div className="text-4xl font-black text-pink-600 mb-2">Free</div>
+              <div className="text-4xl font-black mx-gradient-text mb-2">Free</div>
               <p className="font-semibold text-gray-900">Shipping</p>
               <p className="text-gray-500 text-sm mt-1">Nationwide delivery included</p>
             </div>
             <div className="text-center">
-              <div className="text-4xl font-black text-pink-600 mb-2">30 Days</div>
+              <div className="text-4xl font-black mx-gradient-text mb-2">30 Days</div>
               <p className="font-semibold text-gray-900">Returns</p>
               <p className="text-gray-500 text-sm mt-1">Shop with confidence</p>
               <Link to="/support" className="text-pink-600 text-xs hover:underline mt-1 inline-block">(See return policy)</Link>
@@ -179,11 +179,15 @@ export default function Home() {
       </div>
 
       {/* CTA */}
-      <div className="bg-gray-950 text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
+      <div className="relative mx-gradient-bg text-white overflow-hidden">
+        <div className="absolute inset-0 opacity-[0.07] pointer-events-none"
+          style={{ backgroundImage: 'radial-gradient(circle, #fff 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
+        <div className="absolute top-0 right-0 w-72 h-72 opacity-25 rounded-full pointer-events-none"
+          style={{ background: 'radial-gradient(circle, #fff 0%, transparent 70%)', transform: 'translate(35%, -35%)' }} />
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
           <h2 className="text-3xl font-black mb-4">Ready to save?</h2>
-          <p className="text-gray-400 mb-8">Browse our selection of certified pre-owned bikes.</p>
-          <Link to="/shop" className="inline-flex items-center gap-2 bg-pink-600 hover:bg-pink-700 text-white px-8 py-3.5 rounded-xl font-semibold transition-colors">
+          <p className="text-pink-100/90 mb-8">Browse our selection of certified pre-owned bikes.</p>
+          <Link to="/shop" className="inline-flex items-center gap-2 bg-white text-pink-600 hover:bg-pink-50 px-8 py-3.5 rounded-xl font-semibold transition-colors shadow-xl">
             Shop All Bikes <ArrowRight size={18} />
           </Link>
         </div>

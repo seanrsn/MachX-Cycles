@@ -30,7 +30,7 @@ export default function Login() {
         <div className="text-center mb-8">
           <div className="text-3xl font-bold mb-1">
             <span className="text-white">MachX</span>
-            <span className="text-pink-500"> Cycles</span>
+            <span className="mx-gradient-text"> Cycles</span>
           </div>
           <p className="text-gray-400 text-sm">Admin Dashboard</p>
         </div>
@@ -75,7 +75,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-pink-600 hover:bg-pink-700 disabled:opacity-50 text-white font-medium rounded-lg py-2.5 text-sm transition-colors mt-2"
+              className="w-full mx-gradient-btn disabled:opacity-50 text-white font-semibold rounded-lg py-2.5 text-sm mt-2 shadow-lg shadow-pink-900/40"
             >
               {loading ? 'Signing in…' : 'Sign in'}
             </button>

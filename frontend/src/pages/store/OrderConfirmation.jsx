@@ -82,7 +82,7 @@ export default function OrderConfirmation() {
           <div className="flex flex-col gap-3">
             <Link
               to="/checkout"
-              className="inline-flex items-center justify-center gap-2 bg-pink-600 hover:bg-pink-700 text-white px-8 py-3.5 rounded-xl font-semibold transition-colors"
+              className="inline-flex items-center justify-center gap-2 mx-gradient-btn text-white px-8 py-3.5 rounded-xl font-semibold transition-colors"
             >
               Return to Checkout <ArrowRight size={18} />
             </Link>
@@ -120,7 +120,7 @@ export default function OrderConfirmation() {
           <div className="flex flex-col gap-3">
             <Link
               to="/track-order"
-              className="inline-flex items-center justify-center gap-2 bg-pink-600 hover:bg-pink-700 text-white px-8 py-3.5 rounded-xl font-semibold transition-colors"
+              className="inline-flex items-center justify-center gap-2 mx-gradient-btn text-white px-8 py-3.5 rounded-xl font-semibold transition-colors"
             >
               Track Order <ArrowRight size={18} />
             </Link>
@@ -172,7 +172,7 @@ export default function OrderConfirmation() {
         <div className="flex flex-col gap-3">
           <Link
             to="/track-order"
-            className="inline-flex items-center justify-center gap-2 bg-pink-600 hover:bg-pink-700 text-white px-8 py-3.5 rounded-xl font-semibold transition-colors"
+            className="inline-flex items-center justify-center gap-2 mx-gradient-btn text-white px-8 py-3.5 rounded-xl font-semibold transition-colors"
           >
             Track Order <ArrowRight size={18} />
           </Link>

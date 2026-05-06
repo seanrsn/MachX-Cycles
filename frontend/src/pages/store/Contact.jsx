@@ -207,7 +207,7 @@ export default function Contact() {
                 <button
                   type="submit"
                   disabled={sending}
-                  className="w-full bg-pink-600 hover:bg-pink-700 disabled:bg-pink-400 text-white py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors"
+                  className="w-full mx-gradient-btn disabled:bg-pink-400 text-white py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors"
                 >
                   {sending ? (
                     <>Sending...</>

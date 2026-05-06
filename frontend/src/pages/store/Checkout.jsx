@@ -84,7 +84,7 @@ function CartStep({ items, onRemove, onQty, subtotal, onNext }) {
         <p className="text-xs text-gray-500">Shipping calculated in next step</p>
       </div>
 
-      <button onClick={onNext} className="w-full bg-pink-600 hover:bg-pink-700 text-white py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors">
+      <button onClick={onNext} className="w-full mx-gradient-btn text-white py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors">
         Continue <ChevronRight size={18} />
       </button>
     </div>
@@ -163,7 +163,7 @@ function DetailsStep({ form, onChange, onNext, onBack }) {
 
       <div className="flex gap-3">
         <button type="button" onClick={onBack} className="flex-1 border border-gray-300 text-gray-700 py-3.5 rounded-xl font-semibold hover:border-pink-500 transition-colors">Back</button>
-        <button type="submit" className="flex-grow bg-pink-600 hover:bg-pink-700 text-white py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors">
+        <button type="submit" className="flex-grow mx-gradient-btn text-white py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors">
           Continue <ChevronRight size={18} />
         </button>
       </div>
@@ -202,7 +202,7 @@ function ShippingStep({ selected, onSelect, onNext, onBack }) {
 
       <div className="flex gap-3">
         <button onClick={onBack} className="flex-1 border border-gray-300 text-gray-700 py-3.5 rounded-xl font-semibold hover:border-pink-500 transition-colors">Back</button>
-        <button onClick={onNext} disabled={!selected} className="flex-grow bg-pink-600 hover:bg-pink-700 disabled:bg-gray-300 text-white py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors">
+        <button onClick={onNext} disabled={!selected} className="flex-grow mx-gradient-btn disabled:bg-gray-300 text-white py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors">
           Continue to Payment <ChevronRight size={18} />
         </button>
       </div>
@@ -295,7 +295,7 @@ function PaymentForm({ orderInfo, onSuccess, onBack }) {
         <button
           type="submit"
           disabled={processing || !stripe}
-          className="flex-grow bg-pink-600 hover:bg-pink-700 disabled:bg-pink-400 text-white py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors"
+          className="flex-grow mx-gradient-btn disabled:bg-pink-400 text-white py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors"
         >
           {processing ? (
             <>
