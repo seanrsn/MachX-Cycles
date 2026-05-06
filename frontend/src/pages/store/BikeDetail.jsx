@@ -9,11 +9,11 @@ import Navbar from '../../components/store/Navbar'
 import Footer from '../../components/store/Footer'
 
 // Fullscreen image viewer - hover magnify on desktop, pinch+pan on mobile
-function ImageLightbox({ images, activeIndex, onClose, onPrev, onNext, setActiveIndex }) {
+function ImageLightbox({ images, activeIndex, onClose, onPrev, onNext, setActiveIndex, slideDir }) {
   const [zoom, setZoom] = useState(false)
   const [position, setPosition] = useState({ x: 50, y: 50 })
   const [isTouchDevice] = useState(() => 'ontouchstart' in window)
-  
+
   // Mobile zoom/pan state
   const [scale, setScale] = useState(1)
   const [translate, setTranslate] = useState({ x: 0, y: 0 })
@@ -21,12 +21,24 @@ function ImageLightbox({ images, activeIndex, onClose, onPrev, onNext, setActive
   const lastDistRef = useRef(null)
   const lastCenterRef = useRef(null)
   const imgRef = useRef(null)
-  
-  // Reset zoom when changing images
+
+  // Reset zoom when changing images, and unzoom desktop magnify too
   useEffect(() => {
     setScale(1)
     setTranslate({ x: 0, y: 0 })
+    setZoom(false)
   }, [activeIndex])
+
+  // Keyboard navigation (←/→ to flip, Esc to close)
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose()
+      else if (e.key === 'ArrowLeft')  onPrev()
+      else if (e.key === 'ArrowRight') onNext()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onPrev, onNext, onClose])
   
   const handleTouchStart = (e) => {
     if (e.touches.length === 1 && scale > 1) {
@@ -122,27 +134,30 @@ function ImageLightbox({ images, activeIndex, onClose, onPrev, onNext, setActive
     setZoom(z => !z)
   }
   
+  const slideClass = slideDir === 'right' ? 'img-slide-right' : 'img-slide-left'
+
   return (
-    <div className="fixed inset-0 z-50 bg-black flex flex-col" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-white flex flex-col" onClick={onClose}>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 text-white shrink-0">
-        <span className="text-sm opacity-70">{activeIndex + 1} / {images.length}</span>
-        <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+      <div className="flex items-center justify-between p-4 text-gray-700 shrink-0 border-b border-gray-100">
+        <span className="text-sm font-medium text-gray-500">{activeIndex + 1} / {images.length}</span>
+        <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-700" aria-label="Close">
           <X size={24} />
         </button>
       </div>
-      
+
       {/* Image area */}
-      <div 
-        className="flex-1 flex items-center justify-center p-4 overflow-hidden"
+      <div
+        className="relative flex-1 flex items-center justify-center p-4 overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         {isTouchDevice ? (
           // Mobile: just let the browser handle it natively
           <img
+            key={activeIndex}
             src={images[activeIndex]?.url}
             alt="Product"
-            className="max-w-full max-h-[75vh] object-contain"
+            className={`max-w-full max-h-[75vh] object-contain ${slideClass}`}
           />
         ) : (
           // Desktop: Click to zoom
@@ -153,9 +168,10 @@ function ImageLightbox({ images, activeIndex, onClose, onPrev, onNext, setActive
             onClick={handleImageClick}
           >
             <img
+              key={activeIndex}
               src={images[activeIndex]?.url}
               alt="Product"
-              className="max-w-full max-h-[75vh] object-contain"
+              className={`max-w-full max-h-[75vh] object-contain ${slideClass}`}
               style={{
                 transition: zoom
                   ? 'transform 0.12s ease-out'
@@ -167,18 +183,38 @@ function ImageLightbox({ images, activeIndex, onClose, onPrev, onNext, setActive
             />
           </div>
         )}
+
+        {/* Side arrows */}
+        {images.length > 1 && (
+          <>
+            <button
+              onClick={(e) => { e.stopPropagation(); onPrev(); }}
+              className="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 flex items-center justify-center bg-white shadow-lg ring-1 ring-gray-200 hover:ring-pink-300 hover:shadow-xl rounded-full transition-all text-gray-700 z-10"
+              aria-label="Previous image"
+            >
+              <ChevronLeft size={22} />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onNext(); }}
+              className="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 flex items-center justify-center bg-white shadow-lg ring-1 ring-gray-200 hover:ring-pink-300 hover:shadow-xl rounded-full transition-all text-gray-700 z-10"
+              aria-label="Next image"
+            >
+              <ChevronRight size={22} />
+            </button>
+          </>
+        )}
       </div>
-      
-      {!isTouchDevice && <p className="text-center text-white/50 text-xs pb-2">{zoom ? 'Click or move mouse out to unzoom' : 'Click to zoom'}</p>}
-      
+
+      {!isTouchDevice && <p className="text-center text-gray-400 text-xs pb-2">{zoom ? 'Click or move mouse out to unzoom' : 'Click to zoom'}</p>}
+
       {/* Thumbnails at bottom */}
       {images.length > 1 && (
-        <div className="flex justify-center gap-3 p-4 shrink-0" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-center gap-3 p-4 shrink-0 border-t border-gray-100" onClick={e => e.stopPropagation()}>
           {images.map((img, i) => (
             <button
               key={i}
               onClick={() => setActiveIndex(i)}
-              className={`w-16 h-16 rounded-lg overflow-hidden border-2 transition-all ${i === activeIndex ? 'border-white' : 'border-transparent opacity-50 hover:opacity-80'}`}
+              className={`w-16 h-16 rounded-lg overflow-hidden ring-2 transition-all ${i === activeIndex ? 'ring-pink-500' : 'ring-transparent opacity-60 hover:opacity-100'}`}
             >
               <img src={img.url} alt="" className="w-full h-full object-cover" />
             </button>
@@ -349,9 +385,9 @@ if (bike.model_year) specs.push({ icon: Calendar, label: 'Year', value: bike.mod
             
             {/* Image Gallery */}
             <div className="space-y-3">
-              {/* Main Image */}
-              <div 
-                className="relative cursor-zoom-in group overflow-hidden rounded-xl"
+              {/* Main Image — fixed 4:3 frame so dimensions don't jump between photos */}
+              <div
+                className="relative cursor-zoom-in group overflow-hidden rounded-xl bg-white ring-1 ring-gray-200/80 aspect-[4/3]"
                 onClick={() => images.length > 0 && setLightboxOpen(true)}
               >
                 {images.length > 0 ? (
@@ -360,20 +396,22 @@ if (bike.model_year) specs.push({ icon: Calendar, label: 'Year', value: bike.mod
                       key={activeImg}
                       src={images[activeImg]?.url}
                       alt={bike.name}
-                      className={`w-full h-auto rounded-xl group-hover:scale-[1.02] transition-transform duration-300 ${slideDir === 'right' ? 'img-slide-right' : 'img-slide-left'}`}
+                      className={`absolute inset-0 w-full h-full object-contain group-hover:scale-[1.02] transition-transform duration-300 ${slideDir === 'right' ? 'img-slide-right' : 'img-slide-left'}`}
                     />
                     {/* Navigation */}
                     {images.length > 1 && (
                       <>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); prev(); }} 
-                          className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center bg-white/90 hover:bg-white rounded-full shadow-lg transition"
+                        <button
+                          onClick={(e) => { e.stopPropagation(); prev(); }}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center bg-white shadow-lg ring-1 ring-gray-200 hover:ring-pink-300 rounded-full transition-all z-10"
+                          aria-label="Previous image"
                         >
                           <ChevronLeft size={20} className="text-gray-700" />
                         </button>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); next(); }} 
-                          className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center bg-white/90 hover:bg-white rounded-full shadow-lg transition"
+                        <button
+                          onClick={(e) => { e.stopPropagation(); next(); }}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center bg-white shadow-lg ring-1 ring-gray-200 hover:ring-pink-300 rounded-full transition-all z-10"
+                          aria-label="Next image"
                         >
                           <ChevronRight size={20} className="text-gray-700" />
                         </button>
@@ -381,7 +419,7 @@ if (bike.model_year) specs.push({ icon: Calendar, label: 'Year', value: bike.mod
                     )}
                   </>
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center">
+                  <div className="absolute inset-0 flex items-center justify-center">
                     <Bike size={80} className="text-gray-200" />
                   </div>
                 )}
@@ -574,10 +612,11 @@ if (bike.model_year) specs.push({ icon: Calendar, label: 'Year', value: bike.mod
         <ImageLightbox
           images={images}
           activeIndex={activeImg}
-          setActiveIndex={setActiveImg}
+          slideDir={slideDir}
+          setActiveIndex={(i) => { setSlideDir(i > activeImg ? 'right' : 'left'); setActiveImg(i) }}
           onClose={() => setLightboxOpen(false)}
-          onPrev={() => setActiveImg(i => (i - 1 + images.length) % images.length)}
-          onNext={() => setActiveImg(i => (i + 1) % images.length)}
+          onPrev={() => { setSlideDir('left');  setActiveImg(i => (i - 1 + images.length) % images.length) }}
+          onNext={() => { setSlideDir('right'); setActiveImg(i => (i + 1) % images.length) }}
         />
       )}
 
