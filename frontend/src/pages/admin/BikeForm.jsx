@@ -248,7 +248,15 @@ export default function BikeForm() {
         const created = await createBike(payload)
         bikeId = created.id
       }
-      qc.invalidateQueries({ queryKey: ['admin-bikes'] })
+      // Invalidate every cache that could be holding a stale copy of this bike.
+      // Use prefix matching so all id variants (string/number) and pagination
+      // params get refreshed.
+      qc.invalidateQueries({ queryKey: ['admin-bikes']    })
+      qc.invalidateQueries({ queryKey: ['admin-bike']     })
+      qc.invalidateQueries({ queryKey: ['public-bike']    })
+      qc.invalidateQueries({ queryKey: ['public-bikes']   })
+      qc.invalidateQueries({ queryKey: ['public-featured']})
+      qc.invalidateQueries({ queryKey: ['related-bikes']  })
 
       // Show success state then redirect
       setSuccess(true)
