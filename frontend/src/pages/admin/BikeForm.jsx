@@ -15,11 +15,53 @@ const CATEGORIES = [
 const MATERIALS = ['Carbon Fiber', 'Aluminum', 'Steel', 'Titanium']
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/quicktime', 'video/mov']
 const ACCEPT_ATTR    = '.jpg,.jpeg,.png,.webp,.gif,.mp4,.mov,image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime'
-const IMAGE_MAX = 10 * 1024 * 1024   // 10 MB
-const VIDEO_MAX = 100 * 1024 * 1024  // 100 MB
+const IMAGE_MAX        = 25 * 1024 * 1024   // 25 MB hard cap (post-compression)
+const VIDEO_MAX        = 100 * 1024 * 1024  // 100 MB
+const COMPRESS_OVER    = 4 * 1024 * 1024    // skip compression below this — already small enough
+const MAX_EDGE         = 3200               // longest edge in pixels after resize
+const JPEG_QUALITY     = 0.92               // visually lossless
 
 function isVideo(url) {
   return /\.(mp4|mov|quicktime)(\?|$)/i.test(url)
+}
+
+// Auto-optimize phone photos: resize longest edge to MAX_EDGE, re-encode JPEG @92%.
+// Skips: non-images, files already under COMPRESS_OVER, GIFs (would lose animation).
+// Returns the original File if compression would increase size or throws.
+async function compressImage(file) {
+  if (!file.type.startsWith('image/')) return file
+  if (file.size < COMPRESS_OVER)        return file
+  if (file.type === 'image/gif')        return file
+
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file)
+      const i = new Image()
+      i.onload  = () => { URL.revokeObjectURL(url); resolve(i) }
+      i.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode failed')) }
+      i.src = url
+    })
+
+    const longest = Math.max(img.naturalWidth, img.naturalHeight)
+    const scale   = Math.min(1, MAX_EDGE / longest)
+    const w       = Math.round(img.naturalWidth  * scale)
+    const h       = Math.round(img.naturalHeight * scale)
+
+    const canvas = document.createElement('canvas')
+    canvas.width  = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(img, 0, 0, w, h)
+
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', JPEG_QUALITY))
+    if (!blob || blob.size >= file.size) return file
+
+    const newName = file.name.replace(/\.[^.]+$/, '') + '.jpg'
+    return new File([blob], newName, { type: 'image/jpeg' })
+  } catch {
+    return file
+  }
 }
 
 // ── ImageManager ──────────────────────────────────────────────────────────────
@@ -39,22 +81,29 @@ function ImageManager({ bikeId, initialImages = [] }) {
     setUploads(prev => [...prev, ...newUploads])
 
     for (const item of newUploads) {
-      const { file } = item
-      const isVid = file.type.startsWith('video/')
-      const limit = isVid ? VIDEO_MAX : IMAGE_MAX
+      const isVid = item.file.type.startsWith('video/')
 
-      if (!ACCEPTED_TYPES.includes(file.type)) {
+      if (!ACCEPTED_TYPES.includes(item.file.type)) {
         setUploads(prev => prev.map(u => u.id === item.id ? { ...u, error: 'Unsupported file type' } : u))
         continue
       }
+
+      // Auto-compress oversized phone photos before validating size cap
+      let file = item.file
+      if (!isVid) {
+        setUploads(prev => prev.map(u => u.id === item.id ? { ...u, progress: 10 } : u))
+        file = await compressImage(item.file)
+      }
+
+      const limit = isVid ? VIDEO_MAX : IMAGE_MAX
       if (file.size > limit) {
-        const mb = isVid ? '100' : '10'
+        const mb = isVid ? '100' : '25'
         setUploads(prev => prev.map(u => u.id === item.id ? { ...u, error: `File exceeds ${mb} MB limit` } : u))
         continue
       }
 
       try {
-        // 1. Get presigned URL
+        // 1. Get presigned URL (use post-compression filename/content-type)
         const { upload_url, image_url, image_id } = await getUploadUrl(bikeId, {
           filename:     file.name,
           content_type: file.type,
@@ -169,7 +218,7 @@ function ImageManager({ bikeId, initialImages = [] }) {
       >
         <Upload size={24} className="text-gray-400" />
         <p className="text-sm font-medium text-gray-700">Drop files or tap to upload</p>
-        <p className="text-xs text-gray-400">JPG / JPEG, PNG, WebP, GIF, MP4, MOV · Images ≤ 10 MB · Videos ≤ 100 MB</p>
+        <p className="text-xs text-gray-400">JPG / JPEG, PNG, WebP, GIF, MP4, MOV · Photos auto-optimized · Videos ≤ 100 MB</p>
       </div>
       <input
         ref={fileRef}
