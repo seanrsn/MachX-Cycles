@@ -37,13 +37,19 @@ export default function About() {
       <Navbar />
 
       {/* Hero */}
-      <section className="bg-gray-950 text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 sm:py-28">
+      <section className="relative text-white overflow-hidden" style={{ background: '#0a0a0f' }}>
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute -top-40 -right-32 w-[700px] h-[700px] rounded-full opacity-25"
+            style={{ background: 'radial-gradient(circle, #ec4899 0%, transparent 60%)' }} />
+          <div className="absolute top-1/3 -right-72 w-[500px] h-[500px] rounded-full opacity-20"
+            style={{ background: 'radial-gradient(circle, #f97316 0%, transparent 65%)' }} />
+        </div>
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 sm:py-28">
           <div className="max-w-3xl">
             <p className="text-pink-400 font-semibold text-sm uppercase tracking-widest mb-4">Our Story</p>
-            <h1 className="text-4xl sm:text-5xl font-black leading-tight mb-6">
+            <h1 className="text-4xl sm:text-5xl font-black leading-tight mb-6 tracking-tight">
               Premium performance.<br />
-              <span className="text-pink-500">Smarter prices.</span>
+              <span className="mx-gradient-text">Smarter prices.</span>
             </h1>
             <p className="text-gray-400 text-lg leading-relaxed">
               MachX Cycles started with a simple idea: you shouldn't have to pay full retail
@@ -57,7 +63,10 @@ export default function About() {
       {/* Origin story */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="max-w-3xl">
-          <h2 className="text-3xl font-bold text-gray-900 mb-6">Why Pre-Owned Makes Sense</h2>
+          <p className="text-pink-600 text-[11px] font-bold uppercase tracking-[0.22em] mb-2">Why Pre-Owned</p>
+          <h2 className="text-3xl font-black text-gray-900 mb-6 tracking-tight">
+            New bikes <span className="mx-gradient-text">depreciate fast.</span>
+          </h2>
           <div className="space-y-4 text-gray-600 leading-relaxed text-lg">
             <p>
               Let's be honest: bikes depreciate the moment they leave the shop. That
@@ -80,21 +89,21 @@ export default function About() {
       </section>
 
       {/* Values */}
-      <section className="bg-white border-y border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-gray-900 mb-4">What Sets Us Apart</h2>
+      <section className="bg-white border-y border-gray-100">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
+          <div className="text-center mb-14">
+            <p className="text-pink-600 text-[11px] font-bold uppercase tracking-[0.22em] mb-2">What Sets Us Apart</p>
+            <h2 className="text-3xl sm:text-4xl font-black text-gray-900 mb-4 tracking-tight">
+              A better way to <span className="mx-gradient-text">buy pre-owned.</span>
+            </h2>
             <p className="text-gray-600 max-w-2xl mx-auto">
-              We're not just flipping bikes. We're building a better way to buy pre-owned
-              — with transparency, quality, and real value.
+              We're not just flipping bikes — we're building a transparent, quality-first marketplace where the right bike finds the right rider.
             </p>
           </div>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-8">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {VALUES.map(({ icon: Icon, title, desc }) => (
-              <div key={title} className="text-center">
-                <div className="inline-flex items-center justify-center w-14 h-14 bg-pink-100 text-pink-600 rounded-2xl mb-4">
-                  <Icon size={28} />
-                </div>
+              <div key={title} className="bg-white rounded-2xl ring-1 ring-gray-200/80 hover:ring-pink-200 hover:shadow-xl hover:shadow-pink-100/40 transition-all duration-300 hover:-translate-y-1 p-6">
+                <Icon size={22} className="text-pink-500 mb-5" strokeWidth={1.75} />
                 <h3 className="font-bold text-gray-900 mb-2">{title}</h3>
                 <p className="text-sm text-gray-600 leading-relaxed">{desc}</p>
               </div>
@@ -104,46 +113,60 @@ export default function About() {
       </section>
 
       {/* Our Process */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <h2 className="text-3xl font-bold text-gray-900 text-center mb-12">Our Inspection Process</h2>
-        <div className="grid md:grid-cols-4 gap-6">
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
+        <div className="text-center mb-14">
+          <p className="text-pink-600 text-[11px] font-bold uppercase tracking-[0.22em] mb-2">The Process</p>
+          <h2 className="text-3xl sm:text-4xl font-black text-gray-900 tracking-tight">
+            Our <span className="mx-gradient-text">inspection</span> standard.
+          </h2>
+        </div>
+        <div className="grid md:grid-cols-4 gap-5">
           {[
-            { step: '01', title: 'Source', desc: 'We find quality pre-owned bikes from trusted sources' },
+            { step: '01', title: 'Source',  desc: 'We find quality pre-owned bikes from trusted sources' },
             { step: '02', title: 'Inspect', desc: 'Multi-point inspection covers frame, components, and wear' },
             { step: '03', title: 'Certify', desc: 'Only bikes that pass our standards get listed' },
-            { step: '04', title: 'Ship', desc: 'Tuned, cleaned, and carefully packed for delivery' },
+            { step: '04', title: 'Ship',    desc: 'Tuned, cleaned, and carefully packed for delivery' },
           ].map(({ step, title, desc }) => (
-            <div key={step} className="bg-white rounded-2xl border border-gray-200 p-6">
-              <span className="text-pink-600 font-bold text-sm">{step}</span>
-              <h3 className="font-bold text-gray-900 text-lg mt-2 mb-2">{title}</h3>
-              <p className="text-gray-600 text-sm">{desc}</p>
+            <div key={step} className="bg-white rounded-2xl ring-1 ring-gray-200/80 p-6 hover:ring-pink-200 hover:shadow-xl hover:shadow-pink-100/40 transition-all duration-300 hover:-translate-y-1">
+              <span className="text-3xl font-black mx-gradient-text leading-none">{step}</span>
+              <h3 className="font-bold text-gray-900 text-lg mt-3 mb-2">{title}</h3>
+              <p className="text-gray-600 text-sm leading-relaxed">{desc}</p>
             </div>
           ))}
         </div>
       </section>
 
       {/* Policies */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
-        <div className="bg-gray-950 rounded-3xl text-white p-8 sm:p-12 text-center">
-          <h2 className="text-3xl font-bold mb-4">Our Policies</h2>
-          <p className="text-gray-400 max-w-2xl mx-auto mb-8 leading-relaxed">
-            We believe in transparency. Here's exactly what you get when you buy from MachX.
-          </p>
-          <div className="flex flex-wrap justify-center gap-8 text-sm">
-            <div className="text-center">
-              <span className="text-pink-500 text-2xl font-bold block">30 Days</span>
-              <span className="text-gray-400">Return Window</span>
-            </div>
-            <div className="text-center">
-              <span className="text-pink-500 text-2xl font-bold block">100%</span>
-              <span className="text-gray-400">Inspected</span>
-            </div>
-            <div className="text-center">
-              <span className="text-pink-500 text-2xl font-bold block">Real</span>
-              <span className="text-gray-400">Photos & Specs</span>
-            </div>
+      <section className="relative overflow-hidden text-white" style={{ background: '#0a0a0f' }}>
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute top-0 left-1/3 w-[700px] h-[400px]"
+            style={{ background: 'radial-gradient(ellipse, rgba(236,72,153,0.15) 0%, transparent 70%)' }} />
+          <div className="absolute bottom-0 right-1/4 w-[600px] h-[300px]"
+            style={{ background: 'radial-gradient(ellipse, rgba(249,115,22,0.10) 0%, transparent 70%)' }} />
+        </div>
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
+          <div className="text-center mb-14 max-w-2xl mx-auto">
+            <p className="text-pink-400 text-[11px] font-bold uppercase tracking-[0.22em] mb-2">Our Policies</p>
+            <h2 className="text-3xl sm:text-4xl font-black mb-4 tracking-tight">
+              Built on <span className="mx-gradient-text">transparency.</span>
+            </h2>
+            <p className="text-gray-400 leading-relaxed">
+              Here's exactly what you get when you buy from MachX.
+            </p>
           </div>
-          <p className="text-gray-500 text-xs mt-8">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 max-w-3xl mx-auto">
+            {[
+              { stat: '30 Days', label: 'Return Window' },
+              { stat: '100%',    label: 'Inspected' },
+              { stat: 'Real',    label: 'Photos & Specs' },
+            ].map(({ stat, label }) => (
+              <div key={label} className="bg-white/[0.04] border border-white/10 rounded-2xl p-6 text-center hover:bg-white/[0.06] hover:border-pink-500/30 transition-all duration-300">
+                <span className="block text-3xl font-black mx-gradient-text leading-none pb-1">{stat}</span>
+                <span className="block text-gray-400 text-sm mt-2">{label}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-gray-500 text-xs mt-10 text-center">
             * Returns subject to 15% restocking fee. Customer covers return shipping. See Support page for full details.
           </p>
         </div>

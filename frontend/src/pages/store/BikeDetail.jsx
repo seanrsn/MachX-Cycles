@@ -336,7 +336,10 @@ if (bike.model_year) specs.push({ icon: Calendar, label: 'Year', value: bike.mod
             >
               <ChevronLeft size={20} />
             </Link>
-            <span className="bg-pink-600 text-white text-xs font-bold px-3 py-1.5 rounded">PRE-OWNED</span>
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 uppercase tracking-[0.18em] bg-white border border-gray-200 px-3 py-1.5 rounded-full">
+              <span className="w-1.5 h-1.5 rounded-full bg-pink-500" />
+              Pre-Owned
+            </span>
           </div>
           
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-12">

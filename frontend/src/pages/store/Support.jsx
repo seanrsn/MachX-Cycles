@@ -9,7 +9,7 @@ const POLICIES = [
   {
     icon: RotateCcw,
     title: '30-Day Return Policy',
-    color: 'mx-gradient-bg text-white shadow-md shadow-pink-200',
+    color: 'bg-pink-50 text-pink-600',
     content: `
       Not the right fit? You have 30 days to return your bike.
       
@@ -57,7 +57,7 @@ const POLICIES = [
   {
     icon: Truck,
     title: 'Shipping & Delivery',
-    color: 'bg-orange-100 text-orange-600',
+    color: 'bg-pink-50 text-pink-600',
     content: `
       **FREE shipping on all bikes** — nationwide delivery included.
       
@@ -83,7 +83,7 @@ const POLICIES = [
   {
     icon: CreditCard,
     title: 'Payment Options',
-    color: 'bg-rose-100 text-rose-600',
+    color: 'bg-pink-50 text-pink-600',
     content: `
       We make it easy to pay however works for you.
       
@@ -104,7 +104,7 @@ const POLICIES = [
   {
     icon: Ruler,
     title: 'Sizing Guide',
-    color: 'mx-gradient-bg text-white shadow-md shadow-pink-200',
+    color: 'bg-pink-50 text-pink-600',
     content: 'sizing_chart',
   },
 ]

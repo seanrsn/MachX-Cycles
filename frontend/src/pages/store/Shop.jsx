@@ -17,14 +17,21 @@ function BikeCard({ bike }) {
   const img   = bike.images?.[0]?.url || null
   const price = bike.min_variant_price ?? bike.base_price
   const msrp  = bike.msrp
+  const discount = msrp && parseFloat(msrp) > parseFloat(price)
+    ? Math.round((1 - parseFloat(price) / parseFloat(msrp)) * 100)
+    : null
   return (
-    <Link to={`/bikes/${bike.id}`} className="group bg-white rounded-2xl overflow-hidden border border-gray-200 hover:shadow-lg transition-all duration-200 hover:-translate-y-0.5">
+    <Link to={`/bikes/${bike.id}`} className="group bg-white rounded-2xl overflow-hidden ring-1 ring-gray-200/80 hover:ring-pink-200 hover:shadow-xl hover:shadow-pink-100/40 transition-all duration-300 hover:-translate-y-1">
       <div className="aspect-[4/3] bg-gray-100 overflow-hidden relative">
         {img
           ? <img src={img} alt={bike.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
           : <div className="w-full h-full flex items-center justify-center"><Bike size={48} className="text-gray-300" /></div>
         }
-        <span className="absolute top-3 left-3 bg-pink-600 text-white text-xs font-bold px-2 py-1 rounded">PRE-OWNED</span>
+        {discount && (
+          <span className="absolute top-3 left-3 mx-gradient-bg text-white text-[11px] font-bold px-2.5 py-1 rounded-full tracking-wider shadow-md shadow-pink-900/20">
+            {discount}% OFF
+          </span>
+        )}
       </div>
       <div className="p-4">
         <span className="text-xs font-medium text-pink-600 uppercase tracking-wide">{bike.category_name}</span>
