@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, Save, Upload, X, Film, ImageIcon, CheckCircle, Bike } from 'lucide-react'
+import { Plus, Trash2, Save, Upload, X, Film, ImageIcon, CheckCircle, Bike, GripVertical } from 'lucide-react'
 import {
   getBike, createBike, updateBike,
-  getUploadUrl, deleteImage,
+  getUploadUrl, deleteImage, reorderImages,
 } from '../../api/admin'
 import { PageHeader, Button, Spinner } from '../../components/common'
 
@@ -25,7 +25,8 @@ function isVideo(url) {
   return /\.(mp4|mov|quicktime)(\?|$)/i.test(url)
 }
 
-// Auto-optimize phone photos: resize longest edge to MAX_EDGE, re-encode JPEG @92%.
+// Auto-optimize phone photos: resize longest edge to MAX_EDGE, re-encode at 92%.
+// PNGs become WebP (preserves transparency); everything else becomes JPEG.
 // Skips: non-images, files already under COMPRESS_OVER, GIFs (would lose animation).
 // Returns the original File if compression would increase size or throws.
 async function compressImage(file) {
@@ -54,11 +55,17 @@ async function compressImage(file) {
     ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(img, 0, 0, w, h)
 
-    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', JPEG_QUALITY))
+    // PNG and WebP can carry transparency — re-encode as WebP to preserve alpha.
+    // JPEG inputs stay JPEG (smallest for photos, no alpha to lose).
+    const preservesAlpha = file.type === 'image/png' || file.type === 'image/webp'
+    const outType = preservesAlpha ? 'image/webp' : 'image/jpeg'
+    const outExt  = preservesAlpha ? '.webp'      : '.jpg'
+
+    const blob = await new Promise(res => canvas.toBlob(res, outType, JPEG_QUALITY))
     if (!blob || blob.size >= file.size) return file
 
-    const newName = file.name.replace(/\.[^.]+$/, '') + '.jpg'
-    return new File([blob], newName, { type: 'image/jpeg' })
+    const newName = file.name.replace(/\.[^.]+$/, '') + outExt
+    return new File([blob], newName, { type: outType })
   } catch {
     return file
   }
@@ -70,10 +77,40 @@ function ImageManager({ bikeId, initialImages = [] }) {
   const [images, setImages]       = useState(initialImages)
   const [uploads, setUploads]     = useState([])   // { id, file, progress, error, done }
   const [dragging, setDragging]   = useState(false)
+  const [dragId, setDragId]       = useState(null) // image being dragged
+  const [overId, setOverId]       = useState(null) // image being hovered during drag
   const fileRef                   = useRef(null)
   const disabled                  = !bikeId
 
   useEffect(() => { setImages(initialImages) }, [initialImages.length])
+
+  // Reorder: move dragId before/after overId, persist to backend
+  async function handleReorderDrop(targetId) {
+    if (!dragId || dragId === targetId) {
+      setDragId(null); setOverId(null); return
+    }
+    const fromIdx = images.findIndex(i => i.id === dragId)
+    const toIdx   = images.findIndex(i => i.id === targetId)
+    if (fromIdx < 0 || toIdx < 0) {
+      setDragId(null); setOverId(null); return
+    }
+
+    const next = images.slice()
+    const [moved] = next.splice(fromIdx, 1)
+    next.splice(toIdx, 0, moved)
+
+    // Optimistic update
+    const previous = images
+    setImages(next)
+    setDragId(null); setOverId(null)
+
+    try {
+      await reorderImages(bikeId, next.map(i => i.id))
+    } catch {
+      setImages(previous)
+      alert('Failed to save new order. Please try again.')
+    }
+  }
 
   async function handleFiles(files) {
     const list = Array.from(files)
@@ -154,33 +191,63 @@ function ImageManager({ bikeId, initialImages = [] }) {
         </div>
       )}
 
-      {/* Existing images grid */}
+      {/* Existing images grid — drag to reorder. Number badge shows display order. */}
       {images.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-          {images.map(img => (
-            <div key={img.id} className="relative group aspect-square rounded-lg overflow-hidden bg-gray-100 border border-gray-200">
-              {isVideo(img.url) ? (
-                <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
-                  <Film size={32} />
-                  <span className="text-xs mt-1">Video</span>
+        <>
+          <p className="text-xs text-gray-500">Drag to reorder · #1 is the cover photo customers see first.</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            {images.map((img, idx) => {
+              const isDragging  = dragId === img.id
+              const isDropTarget = overId === img.id && dragId && dragId !== img.id
+              return (
+                <div
+                  key={img.id}
+                  draggable
+                  onDragStart={() => setDragId(img.id)}
+                  onDragOver={e => { e.preventDefault(); if (dragId && dragId !== img.id) setOverId(img.id) }}
+                  onDragLeave={() => setOverId(o => o === img.id ? null : o)}
+                  onDrop={e => { e.preventDefault(); handleReorderDrop(img.id) }}
+                  onDragEnd={() => { setDragId(null); setOverId(null) }}
+                  className={`relative group aspect-square rounded-lg overflow-hidden bg-gray-100 ring-1 transition-all cursor-grab active:cursor-grabbing
+                    ${isDragging   ? 'opacity-40 ring-pink-300' : 'ring-gray-200'}
+                    ${isDropTarget ? 'ring-2 ring-pink-500 scale-[1.02]' : ''}`}
+                >
+                  {isVideo(img.url) ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
+                      <Film size={32} />
+                      <span className="text-xs mt-1">Video</span>
+                    </div>
+                  ) : (
+                    <img
+                      src={img.url}
+                      alt=""
+                      className="w-full h-full object-cover pointer-events-none"
+                      onError={e => { e.target.style.display = 'none' }}
+                    />
+                  )}
+
+                  {/* Order number badge */}
+                  <div className="absolute top-1.5 left-1.5 mx-gradient-bg text-white text-[11px] font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-md shadow-pink-900/30 pointer-events-none">
+                    {idx + 1}
+                  </div>
+
+                  {/* Drag handle hint */}
+                  <div className="absolute bottom-1.5 left-1.5 p-1 bg-white/85 backdrop-blur-sm rounded text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                    <GripVertical size={12} />
+                  </div>
+
+                  <button
+                    onClick={() => handleDelete(img)}
+                    className="absolute top-1 right-1 p-1 bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                    aria-label="Remove image"
+                  >
+                    <X size={12} />
+                  </button>
                 </div>
-              ) : (
-                <img
-                  src={img.url}
-                  alt=""
-                  className="w-full h-full object-cover"
-                  onError={e => { e.target.style.display = 'none' }}
-                />
-              )}
-              <button
-                onClick={() => handleDelete(img)}
-                className="absolute top-1 right-1 p-1 bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow"
-              >
-                <X size={12} />
-              </button>
-            </div>
-          ))}
-        </div>
+              )
+            })}
+          </div>
+        </>
       )}
 
       {/* Upload progress */}

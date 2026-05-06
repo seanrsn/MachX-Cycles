@@ -15,8 +15,9 @@ export const updateBike = (id, body)   => api.put(`/admin/bikes/${id}`, body)
 export const deleteBike = (id)         => api.delete(`/admin/bikes/${id}`)
 
 // ── Images ────────────────────────────────────────────────────────────────────
-export const getUploadUrl  = (bikeId, body)   => api.post(`/admin/bikes/${bikeId}/images`, body)
-export const deleteImage   = (bikeId, imgId)  => api.delete(`/admin/bikes/${bikeId}/images/${imgId}`)
+export const getUploadUrl   = (bikeId, body)      => api.post(`/admin/bikes/${bikeId}/images`, body)
+export const deleteImage    = (bikeId, imgId)     => api.delete(`/admin/bikes/${bikeId}/images/${imgId}`)
+export const reorderImages  = (bikeId, imageIds)  => api.put(`/admin/bikes/${bikeId}/images/reorder`, { image_ids: imageIds })
 
 // ── Orders ────────────────────────────────────────────────────────────────────
 export const getOrders  = (params = {}) => api.get('/admin/orders?' + new URLSearchParams(params))

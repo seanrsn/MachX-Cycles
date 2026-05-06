@@ -12,6 +12,7 @@ Routes:
   DELETE /admin/bikes/{id}                    delete_bike
 
   POST   /admin/bikes/{id}/images             upload_image (presigned URL)
+  PUT    /admin/bikes/{id}/images/reorder    reorder_images
   DELETE /admin/bikes/{id}/images/{img_id}   delete_image
 
   GET    /admin/orders                        list_orders
@@ -51,6 +52,7 @@ logger.setLevel(logging.INFO)
 _RE_BIKES           = re.compile(r'^/admin/bikes$')
 _RE_BIKE            = re.compile(r'^/admin/bikes/(\d+)$')
 _RE_IMAGES          = re.compile(r'^/admin/bikes/(\d+)/images$')
+_RE_IMAGES_REORDER  = re.compile(r'^/admin/bikes/(\d+)/images/reorder$')
 _RE_IMAGE           = re.compile(r'^/admin/bikes/(\d+)/images/(\d+)$')
 _RE_ORDERS          = re.compile(r'^/admin/orders$')
 _RE_ORDER           = re.compile(r'^/admin/orders/(\d+)$')
@@ -94,6 +96,14 @@ def _route(method, path, event):
         if method == 'GET':    return get_bike(bike_id)
         if method == 'PUT':    return update_bike(bike_id, event)
         if method == 'DELETE': return delete_bike(bike_id)
+
+    # Images reorder (must come BEFORE single image — '/images/reorder' would
+    # otherwise match _RE_IMAGE if 'reorder' were numeric; it isn't, but we
+    # still keep the order explicit for safety)
+    m = _RE_IMAGES_REORDER.match(path)
+    if m:
+        bike_id = int(m.group(1))
+        if method == 'PUT': return reorder_images(bike_id, event)
 
     # Images collection
     m = _RE_IMAGES.match(path)
@@ -442,6 +452,44 @@ def delete_image(bike_id: int, img_id: int):
         conn.rollback()
         raise
     return success({'message': f'Image {img_id} removed'})
+
+
+def reorder_images(bike_id: int, event):
+    """
+    Body: { "image_ids": [3, 1, 2] }  — full ordered list of image IDs for this bike.
+    Updates bike_images.sort_order so the array order is reflected in queries.
+    """
+    body = parse_body(event) or {}
+    ids  = body.get('image_ids')
+    if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
+        return error('image_ids must be an array of integers', status=400)
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            # Verify every supplied id belongs to this bike, and that we have
+            # the complete set (caller can't drop or add ids in a reorder).
+            cur.execute(
+                "SELECT id FROM bike_images WHERE bike_id = %s",
+                (bike_id,)
+            )
+            existing = {row['id'] for row in cur.fetchall()}
+            if set(ids) != existing:
+                return error(
+                    'image_ids must list every image for this bike exactly once',
+                    status=400,
+                )
+
+            for sort_order, img_id in enumerate(ids):
+                cur.execute(
+                    "UPDATE bike_images SET sort_order = %s WHERE id = %s AND bike_id = %s",
+                    (sort_order, img_id, bike_id),
+                )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return success({'message': f'Reordered {len(ids)} images'})
 
 
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
