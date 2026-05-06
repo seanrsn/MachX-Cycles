@@ -9,7 +9,7 @@ const POLICIES = [
   {
     icon: RotateCcw,
     title: '30-Day Return Policy',
-    color: 'bg-blue-100 text-blue-600',
+    color: 'mx-gradient-bg text-white shadow-md shadow-pink-200',
     content: `
       Not the right fit? You have 30 days to return your bike.
       
@@ -34,7 +34,7 @@ const POLICIES = [
   {
     icon: Search,
     title: 'Inspection & Certification',
-    color: 'bg-emerald-100 text-emerald-600',
+    color: 'bg-pink-100 text-pink-600',
     content: `
       Every bike goes through our multi-point inspection before listing.
       
@@ -57,7 +57,7 @@ const POLICIES = [
   {
     icon: Truck,
     title: 'Shipping & Delivery',
-    color: 'bg-purple-100 text-purple-600',
+    color: 'bg-orange-100 text-orange-600',
     content: `
       **FREE shipping on all bikes** — nationwide delivery included.
       
@@ -83,7 +83,7 @@ const POLICIES = [
   {
     icon: CreditCard,
     title: 'Payment Options',
-    color: 'bg-amber-100 text-amber-600',
+    color: 'bg-rose-100 text-rose-600',
     content: `
       We make it easy to pay however works for you.
       
@@ -104,7 +104,7 @@ const POLICIES = [
   {
     icon: Ruler,
     title: 'Sizing Guide',
-    color: 'bg-pink-100 text-pink-600',
+    color: 'mx-gradient-bg text-white shadow-md shadow-pink-200',
     content: 'sizing_chart',
   },
 ]
@@ -256,7 +256,7 @@ export default function Support() {
           <div className="max-w-2xl">
             <p className="text-pink-400 font-semibold text-sm uppercase tracking-widest mb-4">Support</p>
             <h1 className="text-4xl sm:text-5xl font-black leading-tight mb-4">
-              Policies & FAQ
+              Policies & <span className="mx-gradient-text">FAQ</span>
             </h1>
             <p className="text-gray-400 text-lg">
               Everything you need to know about buying pre-owned bikes from MachX. 
@@ -290,17 +290,21 @@ export default function Support() {
 
       {/* CTA */}
       <section className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
-        <div className="bg-pink-600 rounded-2xl text-white p-8 sm:p-10 text-center">
-          <h2 className="text-2xl font-bold mb-3">Still have questions?</h2>
-          <p className="text-pink-100 mb-6">
-            Reach out anytime — we're real people and we actually respond.
-          </p>
-          <Link
-            to="/contact"
-            className="inline-flex items-center gap-2 bg-white text-pink-600 px-8 py-3 rounded-xl font-semibold hover:bg-pink-50 transition-colors"
-          >
-            Contact Us
-          </Link>
+        <div className="relative mx-gradient-bg rounded-2xl text-white p-8 sm:p-10 text-center overflow-hidden">
+          <div className="absolute inset-0 opacity-[0.07] pointer-events-none"
+            style={{ backgroundImage: 'radial-gradient(circle, #fff 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
+          <div className="relative">
+            <h2 className="text-2xl font-bold mb-3">Still have questions?</h2>
+            <p className="text-pink-100 mb-6">
+              Reach out anytime — we're real people and we actually respond.
+            </p>
+            <Link
+              to="/contact"
+              className="inline-flex items-center gap-2 bg-white text-pink-600 px-8 py-3 rounded-xl font-semibold hover:bg-pink-50 transition-colors shadow-xl"
+            >
+              Contact Us
+            </Link>
+          </div>
         </div>
       </section>
 

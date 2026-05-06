@@ -33,17 +33,23 @@ export default function Navbar() {
           <div className="flex items-center gap-8">
             {/* Desktop nav */}
             <div className="hidden md:flex items-center gap-8">
-              {NAV_LINKS.map(link => (
-                <Link
-                  key={link.href}
-                  to={link.href}
-                  className={`text-base font-medium transition-colors hover:text-pink-500 ${
-                    location.pathname === link.href ? 'text-pink-500' : 'text-gray-300'
-                  }`}
-                >
-                  {link.label}
-                </Link>
-              ))}
+              {NAV_LINKS.map(link => {
+                const active = location.pathname === link.href
+                return (
+                  <Link
+                    key={link.href}
+                    to={link.href}
+                    className={`relative text-base font-medium transition-colors hover:text-white ${
+                      active ? 'text-white' : 'text-gray-300'
+                    }`}
+                  >
+                    {link.label}
+                    {active && (
+                      <span className="absolute -bottom-1.5 left-0 right-0 h-0.5 mx-gradient-bg rounded-full" />
+                    )}
+                  </Link>
+                )
+              })}
             </div>
             
             {/* Cart */}

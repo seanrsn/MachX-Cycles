@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Helmet } from 'react-helmet-async'
-import { ArrowRight, Bike, CheckCircle, Truck, Search, Shield, Headphones } from 'lucide-react'
+import { ArrowRight, Bike, CheckCircle, Truck, Search, Shield, Headphones, Trophy, RotateCcw } from 'lucide-react'
 import { getBikes, getCategories } from '../../api/public'
 import Navbar from '../../components/store/Navbar'
 import Footer from '../../components/store/Footer'
@@ -151,29 +151,38 @@ export default function Home() {
       )}
 
       {/* The MachX Difference */}
-      <div className="bg-white border-t border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-          <h2 className="text-3xl font-black text-gray-900 text-center mb-4">The MachX Difference</h2>
-          <p className="text-gray-500 text-center max-w-2xl mx-auto mb-12">
+      <div className="relative overflow-hidden text-white" style={{ background: '#0a0a0f' }}>
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute top-0 left-1/3 w-[700px] h-[400px]"
+            style={{ background: 'radial-gradient(ellipse, rgba(236,72,153,0.15) 0%, transparent 70%)' }} />
+          <div className="absolute bottom-0 right-1/4 w-[600px] h-[300px]"
+            style={{ background: 'radial-gradient(ellipse, rgba(249,115,22,0.10) 0%, transparent 70%)' }} />
+        </div>
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
+          <h2 className="text-3xl sm:text-4xl font-black text-white text-center mb-4">The MachX Difference</h2>
+          <p className="text-gray-400 text-center max-w-2xl mx-auto mb-12">
             Every bike is hand-selected, professionally inspected, and tuned before it ships.
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="text-center">
-              <div className="text-4xl font-black mx-gradient-text mb-2">Save Big</div>
-              <p className="font-semibold text-gray-900">Premium Brands</p>
-              <p className="text-gray-500 text-sm mt-1">Trek, Specialized, Cannondale & more</p>
-            </div>
-            <div className="text-center">
-              <div className="text-4xl font-black mx-gradient-text mb-2">Free</div>
-              <p className="font-semibold text-gray-900">Shipping</p>
-              <p className="text-gray-500 text-sm mt-1">Nationwide delivery included</p>
-            </div>
-            <div className="text-center">
-              <div className="text-4xl font-black mx-gradient-text mb-2">30 Days</div>
-              <p className="font-semibold text-gray-900">Returns</p>
-              <p className="text-gray-500 text-sm mt-1">Shop with confidence</p>
-              <Link to="/support" className="text-pink-600 text-xs hover:underline mt-1 inline-block">(See return policy)</Link>
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {[
+              { icon: Trophy,    stat: 'Save Big', label: 'Premium Brands',      sub: 'Trek, Specialized, Cannondale & more' },
+              { icon: Truck,     stat: 'Free',     label: 'Nationwide Shipping', sub: 'Every order ships on us' },
+              { icon: RotateCcw, stat: '30 Days',  label: 'Easy Returns',        sub: 'Shop with confidence', link: true },
+            ].map(({ icon: Icon, stat, label, sub, link }) => (
+              <div key={label} className="bg-white/[0.04] border border-white/10 rounded-2xl p-7 hover:bg-white/[0.06] hover:border-pink-500/30 transition-all duration-300">
+                <div className="w-12 h-12 rounded-xl mx-gradient-bg flex items-center justify-center mb-5 shadow-lg shadow-pink-900/40">
+                  <Icon size={22} className="text-white" strokeWidth={2.25} />
+                </div>
+                <div className="text-4xl font-black mx-gradient-text mb-1">{stat}</div>
+                <p className="font-semibold text-white text-base">{label}</p>
+                <p className="text-gray-400 text-sm mt-1">{sub}</p>
+                {link && (
+                  <Link to="/support" className="text-pink-400 hover:text-pink-300 text-xs font-medium mt-2 inline-block transition-colors">
+                    See return policy →
+                  </Link>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       </div>
