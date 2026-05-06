@@ -433,16 +433,34 @@ def upload_image(bike_id: int, event):
     }, status=201)
 
 
+def _s3_key_from_url(url: str) -> str:
+    """
+    Convert a stored image URL back to its S3 object key.
+    URLs look like: https://<cdn-base>/bikes/<bike_id>/<uuid>-<filename>
+    Returns '' if the URL doesn't sit under our CDN base (e.g. legacy data).
+    """
+    if not url or not IMAGES_CDN_BASE:
+        return ''
+    base = IMAGES_CDN_BASE.rstrip('/') + '/'
+    if url.startswith(base):
+        return url[len(base):]
+    # Defensive: if the schema isn't 'protocol://host/<key>', don't guess.
+    return ''
+
+
 def delete_image(bike_id: int, img_id: int):
     conn = get_connection()
+    s3_key = ''
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM bike_images WHERE id = %s AND bike_id = %s",
+                "SELECT id, url FROM bike_images WHERE id = %s AND bike_id = %s",
                 (img_id, bike_id)
             )
-            if not cur.fetchone():
+            row = cur.fetchone()
+            if not row:
                 return error('Image not found', status=404)
+            s3_key = _s3_key_from_url(row.get('url', ''))
             cur.execute(
                 "DELETE FROM bike_images WHERE id = %s AND bike_id = %s",
                 (img_id, bike_id)
@@ -451,6 +469,20 @@ def delete_image(bike_id: int, img_id: int):
     except Exception:
         conn.rollback()
         raise
+
+    # Best-effort S3 cleanup. The DB is the source of truth — if S3 deletion
+    # fails (network, permissions, key already gone) we still return success
+    # so the admin UI doesn't show a misleading error.
+    if s3_key:
+        try:
+            boto3.client('s3', region_name=AWS_REGION).delete_object(
+                Bucket=IMAGES_BUCKET,
+                Key=s3_key,
+            )
+        except Exception as exc:
+            logger.warning("S3 cleanup failed for bike %s img %s key %s: %s",
+                           bike_id, img_id, s3_key, exc)
+
     return success({'message': f'Image {img_id} removed'})
 
 
