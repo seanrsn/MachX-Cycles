@@ -309,7 +309,7 @@ export default function BikeForm() {
 
   const [form, setForm] = useState({
     name: '', category_id: 1, description: '', base_price: '', msrp: '',
-    material: '', weight: '', model_year: new Date().getFullYear(),
+    material: '', model_year: new Date().getFullYear(),
     featured: false, sold: false,
   })
   const [saving, setSaving]     = useState(false)
@@ -333,7 +333,6 @@ export default function BikeForm() {
       base_price:  bikeData.base_price  || '',
       msrp:        bikeData.msrp        || '',
       material:    bikeData.material    || '',
-      weight:      bikeData.weight      || '',
       model_year:  bikeData.model_year  || new Date().getFullYear(),
       featured:    !!bikeData.featured,
       sold:        !!bikeData.sold,
@@ -513,10 +512,6 @@ export default function BikeForm() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Model Year</label>
             <input type="number" value={form.model_year} onChange={e => setField('model_year', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="Enter the model year" />
-          </div>
-          <div className="sm:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Weight</label>
-            <input value={form.weight} onChange={e => setField('weight', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="Enter weight (e.g. 8.2 kg / 18 lbs)" />
           </div>
           <div className="sm:col-span-2">
             <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>

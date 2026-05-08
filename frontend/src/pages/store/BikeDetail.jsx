@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Helmet } from 'react-helmet-async'
-import { ShoppingCart, ChevronLeft, ChevronRight, Bike, Check, X, Shield, Ruler, Calendar, Scale, Layers } from 'lucide-react'
+import { ShoppingCart, ChevronLeft, ChevronRight, Bike, Check, X, Shield, Ruler, Calendar, Layers } from 'lucide-react'
 import { getBike, getBikes } from '../../api/public'
 import { useCartStore } from '../../store/cartStore'
 import Navbar from '../../components/store/Navbar'
@@ -326,9 +326,8 @@ export default function BikeDetail() {
 
   // Build specs array
   const specs = []
-if (bike.model_year) specs.push({ icon: Calendar, label: 'Year', value: bike.model_year })
-  if (bike.material) specs.push({ icon: Layers, label: 'Frame Material', value: bike.material })
-  if (bike.weight) specs.push({ icon: Scale, label: 'Weight', value: bike.weight })
+  if (bike.model_year) specs.push({ icon: Calendar, label: 'Year',           value: bike.model_year })
+  if (bike.material)   specs.push({ icon: Layers,   label: 'Frame Material', value: bike.material })
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
