@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 
 export default function Login() {
@@ -7,8 +7,21 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(false)
+  const [expired, setExpired]   = useState(false)
   const { login }               = useAuthStore()
   const navigate                = useNavigate()
+  const location                = useLocation()
+
+  // Surface a "session expired" banner whether we got here via Navigate
+  // (router state) or via window.location redirect (sessionStorage flag).
+  useEffect(() => {
+    const fromState = location.state?.expired
+    const fromFlag  = sessionStorage.getItem('mx_session_expired') === '1'
+    if (fromState || fromFlag) {
+      setExpired(true)
+      sessionStorage.removeItem('mx_session_expired')
+    }
+  }, [location.state])
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -37,6 +50,12 @@ export default function Login() {
 
         <div className="bg-gray-900 rounded-2xl p-8 border border-gray-800">
           <h2 className="text-white text-lg font-semibold mb-6">Sign in to your account</h2>
+
+          {expired && (
+            <div className="bg-pink-500/10 border border-pink-500/30 text-pink-300 text-sm rounded-lg px-4 py-3 mb-4">
+              Your session expired. Please sign in again.
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>

@@ -13,8 +13,12 @@ async function request(method, path, body = null) {
     body: body ? JSON.stringify(body) : undefined,
   })
 
-  if (res.status === 401) {
+  // API Gateway + Cognito returns 401 on missing/invalid token, 403 on expired
+  // or denied. Treat both as "log them out and send to /login" — only matters
+  // for /admin/* calls (public endpoints don't require auth and won't 401/403).
+  if ((res.status === 401 || res.status === 403) && path.startsWith('/admin')) {
     useAuthStore.getState().logout()
+    sessionStorage.setItem('mx_session_expired', '1')
     window.location.href = '/login'
     throw new Error('Session expired')
   }

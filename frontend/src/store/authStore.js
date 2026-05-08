@@ -13,6 +13,19 @@ const poolData = {
 
 const userPool = new CognitoUserPool(poolData)
 
+// Decode a JWT and check the `exp` claim. Returns true if the token is missing,
+// malformed, or expired (with a 30s clock-skew buffer so we don't ride the edge).
+export function isTokenExpired(jwt) {
+  if (!jwt) return true
+  try {
+    const payload = JSON.parse(atob(jwt.split('.')[1]))
+    if (typeof payload.exp !== 'number') return true
+    return Date.now() >= (payload.exp * 1000) - 30_000
+  } catch {
+    return true
+  }
+}
+
 export const useAuthStore = create(
   persist(
     (set, get) => ({

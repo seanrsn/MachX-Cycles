@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { useEffect } from 'react'
-import { useAuthStore } from './store/authStore'
+import { useEffect, useState } from 'react'
+import { useAuthStore, isTokenExpired } from './store/authStore'
 import Login from './pages/Login'
 import AdminLayout from './components/layout/AdminLayout'
 import Dashboard from './pages/admin/Dashboard'
@@ -29,8 +29,26 @@ function ScrollToTop() {
 }
 
 function RequireAuth({ children }) {
-  const token = useAuthStore(s => s.idToken)
-  return token ? children : <Navigate to="/login" replace />
+  const token  = useAuthStore(s => s.idToken)
+  const logout = useAuthStore(s => s.logout)
+  const location = useLocation()
+
+  // Re-check expiry on focus + every 30s while the tab is open. Forces a
+  // re-render so an expired token kicks the user back to /login even if they
+  // never trigger an API call.
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const onFocus = () => tick(n => n + 1)
+    const id = setInterval(onFocus, 30_000)
+    window.addEventListener('focus', onFocus)
+    return () => { clearInterval(id); window.removeEventListener('focus', onFocus) }
+  }, [])
+
+  if (!token || isTokenExpired(token)) {
+    if (token) logout()  // stale token — clear it before redirecting
+    return <Navigate to="/login" replace state={{ from: location.pathname, expired: !!token }} />
+  }
+  return children
 }
 
 export default function App() {
