@@ -51,6 +51,7 @@ logger.setLevel(logging.INFO)
 # â”€â”€ Path patterns â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _RE_BIKES           = re.compile(r'^/admin/bikes$')
 _RE_BIKE            = re.compile(r'^/admin/bikes/(\d+)$')
+_RE_BIKE_RELEASE    = re.compile(r'^/admin/bikes/(\d+)/release-reservation$')
 _RE_IMAGES          = re.compile(r'^/admin/bikes/(\d+)/images$')
 _RE_IMAGES_REORDER  = re.compile(r'^/admin/bikes/(\d+)/images/reorder$')
 _RE_IMAGE           = re.compile(r'^/admin/bikes/(\d+)/images/(\d+)$')
@@ -73,14 +74,39 @@ def lambda_handler(event, context):
     if method == 'OPTIONS':
         return handle_options()
 
+    # Defense-in-depth auth check. The API Gateway Cognito Authorizer is the
+    # primary gate, but if a new admin route is added without the authorizer
+    # attached, or someone hits the Lambda via a Function URL directly, this
+    # second check still rejects. The presence of authorizer.claims is itself
+    # proof that Cognito ran (API Gateway populates it from the verified JWT).
+    auth_check = _require_admin(event)
+    if auth_check is not None:
+        return auth_check
+
     try:
         return _route(method, path, event)
-    except pymysql.Error as e:
+    except pymysql.Error:
+        # Don't leak DB errors (column names, host, etc.) to the client. The
+        # full traceback is in CloudWatch via logger.exception.
         logger.exception("Database error")
-        return error('Database error', status=500, details=str(e))
-    except Exception as e:
+        return error('Database error', status=500)
+    except Exception:
         logger.exception("Unhandled exception")
-        return error('Internal server error', status=500, details=str(e))
+        return error('Internal server error', status=500)
+
+
+def _require_admin(event):
+    """Returns None if request has valid Cognito claims (i.e. API Gateway
+    authorizer ran and produced a verified JWT), else returns a 401."""
+    claims = (
+        event.get('requestContext', {})
+             .get('authorizer', {})
+             .get('claims', {})
+    )
+    if not claims or not claims.get('sub'):
+        logger.warning(f"Admin endpoint called without Cognito claims: {event.get('path')}")
+        return error('Unauthorized', status=401)
+    return None
 
 
 def _route(method, path, event):
@@ -88,6 +114,13 @@ def _route(method, path, event):
     if _RE_BIKES.match(path):
         if method == 'GET':  return list_bikes(event)
         if method == 'POST': return create_bike(event)
+
+    # Release reservation (must come BEFORE single bike since it has a longer
+    # path that would never match _RE_BIKE anyway, but explicit ordering for safety)
+    m = _RE_BIKE_RELEASE.match(path)
+    if m:
+        bike_id = int(m.group(1))
+        if method == 'POST': return release_reservation(bike_id, event)
 
     # Single bike
     m = _RE_BIKE.match(path)
@@ -160,6 +193,42 @@ def _slugify(text: str) -> str:
     """Convert a string to a URL-safe slug."""
     slug = re.sub(r'[^a-z0-9]+', '-', text.lower())
     return slug.strip('-')
+
+
+# Field-length caps for admin text inputs. Defense-in-depth so an admin
+# (or anyone with a stolen admin token) can't paste arbitrary novels into
+# the bike record. The frontend escapes JSON-LD strings via safeJsonLd, but
+# we also strip control characters here to keep the DB clean.
+_TEXT_CAPS = {
+    'name':            255,
+    'description':     5000,
+    'material':        50,
+    'frame_size':      20,
+    'condition_grade': 20,
+    'weight':          50,
+    'brand':           100,
+}
+
+
+def _sanitize_text(value, max_len):
+    """Strip C0 control chars (except \\n, \\r, \\t) and cap to max_len.
+    Leaves HTML/markup intact — we don't render bike fields with
+    dangerouslySetInnerHTML. JSON-LD scripts are escaped client-side via
+    safeJsonLd, so `</script>` etc. is safe even if it lands in the DB."""
+    if value is None:
+        return None
+    s = str(value)
+    # Drop C0 controls except tab/newline/carriage-return
+    s = ''.join(c for c in s if c >= ' ' or c in '\t\n\r')
+    return s[:max_len]
+
+
+def _sanitize_bike_body(body):
+    """Apply text caps + control-char strip to admin-controlled bike fields."""
+    for field, cap in _TEXT_CAPS.items():
+        if field in body:
+            body[field] = _sanitize_text(body[field], cap)
+    return body
 
 
 def _unique_slug(cur, base_slug: str, exclude_id: int = None) -> str:
@@ -265,6 +334,8 @@ def create_bike(event):
         if not body.get(field) and body.get(field) != 0:
             return error(f'{field} is required', status=400)
 
+    body = _sanitize_bike_body(body)
+
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -279,8 +350,9 @@ def create_bike(event):
                 """
                 INSERT INTO bikes
                     (category_id, name, slug, description, base_price, msrp,
-                     material, weight, brand, model_year, specs, featured, is_active, sold)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     material, frame_size, condition_grade, weight, brand, model_year,
+                     specs, featured, is_active, sold)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     body['category_id'],
@@ -290,6 +362,8 @@ def create_bike(event):
                     body['base_price'],
                     body.get('msrp'),  # original retail price
                     body.get('material'),
+                    body.get('frame_size'),
+                    body.get('condition_grade'),
                     body.get('weight'),
                     body.get('brand', 'MachX'),
                     body.get('model_year'),
@@ -313,6 +387,8 @@ def update_bike(bike_id: int, event):
     if not body:
         return error('No fields to update', status=400)
 
+    body = _sanitize_bike_body(body)
+
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -324,7 +400,8 @@ def update_bike(bike_id: int, event):
 
             # Build dynamic UPDATE
             updatable = ['category_id', 'name', 'description', 'base_price', 'msrp',
-                         'material', 'weight', 'brand', 'model_year', 'featured', 'is_active', 'sold']
+                         'material', 'frame_size', 'condition_grade', 'weight', 'brand',
+                         'model_year', 'featured', 'is_active', 'sold']
             set_parts, args = [], []
 
             for field in updatable:
@@ -376,6 +453,116 @@ def delete_bike(bike_id: int):
     return success({'message': f'Bike {bike_id} deactivated'})
 
 
+def release_reservation(bike_id: int, event=None):
+    """Manually clear an active reservation on a bike (admin escape hatch).
+
+    Refuses if bike is sold. Also refuses to release a 'processing' reservation
+    by default — at that state the buyer's card is being authorized at Stripe
+    and releasing creates a TOCTOU where another buyer can grab the bike, then
+    the original buyer's payment also succeeds → race-lost auto-refund. For
+    genuine emergencies, pass `force=true` in the body.
+    """
+    body = parse_body(event) if event else {}
+    force = bool(body.get('force'))
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, name, sold, reservation_state, reservation_session_id, reserved_until
+                FROM bikes
+                WHERE id = %s
+                """,
+                (bike_id,)
+            )
+            bike = cur.fetchone()
+            if not bike:
+                return error('Bike not found', status=404)
+            if bike['sold']:
+                return error('Cannot release reservation on a sold bike', status=400)
+            if bike['reservation_state'] in ('none', None):
+                return error('Bike has no active reservation', status=400)
+            if bike['reservation_state'] == 'processing' and not force:
+                return error(
+                    "Bike is in 'processing' state — buyer's card is being authorized. "
+                    "Releasing now risks an automatic refund if their payment succeeds. "
+                    "Pass force=true to release anyway.",
+                    status=409
+                )
+
+            prev_state      = bike['reservation_state']
+            prev_session_id = bike['reservation_session_id']
+
+            # Clear the bike's reservation. WHERE sold=0 prevents flipping a
+            # bike that got marked sold between our SELECT and this UPDATE.
+            cur.execute(
+                """
+                UPDATE bikes
+                SET reservation_state = 'none',
+                    reserved_until = NULL,
+                    reservation_session_id = NULL
+                WHERE id = %s AND sold = 0
+                """,
+                (bike_id,)
+            )
+            if cur.rowcount == 0:
+                return error('Bike state changed during release — please refresh and try again', status=409)
+
+            # Mark the originating session as abandoned so it can't be reused.
+            if prev_session_id:
+                cur.execute(
+                    "UPDATE checkout_sessions SET status = 'abandoned' WHERE id = %s AND status = 'active'",
+                    (prev_session_id,)
+                )
+
+            # Audit log — release_reservation is the most dangerous admin action
+            # (force=true on processing state can cost the original buyer an
+            # auto-refund). Capture WHO did it, WHAT bike, FROM WHAT state, and
+            # whether force was used. Best-effort: don't fail the release if the
+            # audit insert errors (the action itself succeeded).
+            actor_email = ''
+            try:
+                claims = (event or {}).get('requestContext', {}).get('authorizer', {}).get('claims', {}) or {}
+                actor_email = claims.get('email') or claims.get('cognito:username') or ''
+            except Exception:
+                pass
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO order_events
+                      (order_id, event_type, message, created_at)
+                    VALUES (
+                      NULL,
+                      'admin_release_reservation',
+                      %s,
+                      UTC_TIMESTAMP()
+                    )
+                    """,
+                    (json.dumps({
+                        'actor': actor_email,
+                        'bike_id': bike_id,
+                        'previous_state': prev_state,
+                        'previous_session_id': prev_session_id,
+                        'force': force,
+                    }),)
+                )
+            except Exception as audit_err:
+                # Don't roll back — the release succeeded. Just log.
+                print(f"WARN: release_reservation audit log failed: {audit_err}")
+
+        conn.commit()
+        # Don't leak internal session IDs in the response.
+        return success({
+            'message': 'Reservation released',
+            'bike_id': bike_id,
+            'previous_state': prev_state,
+        })
+    except Exception:
+        conn.rollback()
+        raise
+
+
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # IMAGES
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -388,6 +575,21 @@ def upload_image(bike_id: int, event):
     if not filename:
         return error('filename is required', status=400)
 
+    # Allowlist content types — must match what the admin frontend actually
+    # uploads (BikeForm.jsx ACCEPTED_TYPES). This prevents an attacker (or
+    # admin pasting a wrong content_type) from uploading text/html under a
+    # .jpg filename and serving XSS from the images bucket. Keep this list
+    # in sync with frontend/src/pages/admin/BikeForm.jsx ACCEPTED_TYPES.
+    ALLOWED_CONTENT_TYPES = {
+        'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+        'video/mp4', 'video/quicktime', 'video/mov',
+    }
+    if content_type not in ALLOWED_CONTENT_TYPES:
+        return error(
+            f"Unsupported content_type: {content_type}. Allowed: {sorted(ALLOWED_CONTENT_TYPES)}",
+            status=400
+        )
+
     # Sanitise filename
     safe_name = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
     s3_key    = f"bikes/{bike_id}/{uuid.uuid4()}-{safe_name}"
@@ -397,9 +599,12 @@ def upload_image(bike_id: int, event):
     upload_url = s3.generate_presigned_url(
         'put_object',
         Params={
-            'Bucket':      IMAGES_BUCKET,
-            'Key':         s3_key,
-            'ContentType': content_type,
+            'Bucket':       IMAGES_BUCKET,
+            'Key':          s3_key,
+            'ContentType':  content_type,
+            # Filenames are UUIDs — content is effectively immutable. Long
+            # cache makes CloudFront edge serve hits without revalidating.
+            'CacheControl': 'public, max-age=31536000, immutable',
         },
         ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS,
     )
@@ -436,15 +641,22 @@ def upload_image(bike_id: int, event):
 def _s3_key_from_url(url: str) -> str:
     """
     Convert a stored image URL back to its S3 object key.
+    Handles both the current CDN base (CloudFront) and the legacy direct
+    S3 URLs that pre-existing rows still use until backfilled.
     URLs look like: https://<cdn-base>/bikes/<bike_id>/<uuid>-<filename>
-    Returns '' if the URL doesn't sit under our CDN base (e.g. legacy data).
+    Returns '' if the URL doesn't sit under any known base.
     """
-    if not url or not IMAGES_CDN_BASE:
+    if not url:
         return ''
-    base = IMAGES_CDN_BASE.rstrip('/') + '/'
-    if url.startswith(base):
-        return url[len(base):]
-    # Defensive: if the schema isn't 'protocol://host/<key>', don't guess.
+    candidates = [
+        IMAGES_CDN_BASE.rstrip('/') + '/' if IMAGES_CDN_BASE else None,
+        # Legacy: direct S3 URLs from before the CloudFront migration
+        'https://machx-cycles-images.s3.amazonaws.com/',
+        'https://machx-cycles-images.s3.us-east-1.amazonaws.com/',
+    ]
+    for base in candidates:
+        if base and url.startswith(base):
+            return url[len(base):]
     return ''
 
 
@@ -597,9 +809,11 @@ def get_order(order_id: int):
         cur.execute(
             """
             SELECT
-                oi.*,
+                oi.id, oi.order_id, oi.bike_id, oi.quantity, oi.unit_price,
                 b.name AS bike_name,
-                b.slug AS bike_slug
+                b.slug AS bike_slug,
+                b.frame_size,
+                b.material
             FROM order_items oi
             JOIN bikes b ON b.id = oi.bike_id
             WHERE oi.order_id = %s

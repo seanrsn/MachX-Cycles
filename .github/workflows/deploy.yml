@@ -87,10 +87,15 @@ jobs:
         working-directory: backend
         run: bash deploy.sh
 
-  deploy-frontend:
-    name: Build + sync frontend to S3
+  # NOTE: deploy-frontend job removed.
+  # Frontend deploys are done manually via the local AWS CLI flow (much faster
+  # than waiting for CI; we bypass the puppeteer prerender step which has been
+  # flaky in CI). See: cd frontend && npm run build && aws s3 sync ...
+  # If you ever need to re-enable, the prior job definition is in git history.
+  _disabled_frontend:
+    name: Build + sync frontend to S3 (DISABLED — manual deploy)
     needs: [prepare]
-    if: needs.prepare.outputs.should_deploy == 'true'
+    if: false  # never runs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -128,10 +133,39 @@ jobs:
           npm ci --legacy-peer-deps
           npm run build
 
-      - name: Sync to S3
+      - name: Sync to S3 (per-prefix Cache-Control)
+        # Hashed assets (assets/index-XXXXXXXX.js etc.) are immutable — long
+        # cache forever. HTML files change on every deploy — short cache so
+        # inventory updates land within minutes. Static brand assets get a
+        # comfortable middle. Order matters: the first sync is the only one
+        # with --delete (cleans orphans); subsequent syncs only update headers
+        # on already-uploaded files.
         run: |
+          # Pass 1: HTML (default) — short cache + delete orphans
           aws s3 sync frontend/dist/ "s3://${FRONTEND_BUCKET}/" \
             --delete \
+            --cache-control "public, max-age=300, must-revalidate" \
+            --exclude "assets/*" \
+            --exclude "*.png" --exclude "*.svg" --exclude "*.jpg" --exclude "*.webp" --exclude "*.ico" \
+            --exclude "sitemap.xml" --exclude "robots.txt" \
+            --region "$AWS_REGION"
+
+          # Pass 2: hashed bundle assets — immutable, 1 year
+          aws s3 sync frontend/dist/ "s3://${FRONTEND_BUCKET}/" \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "*" --include "assets/*" \
+            --region "$AWS_REGION"
+
+          # Pass 3: brand images / favicons — 30 days
+          aws s3 sync frontend/dist/ "s3://${FRONTEND_BUCKET}/" \
+            --cache-control "public, max-age=2592000" \
+            --exclude "*" --include "*.png" --include "*.svg" --include "*.jpg" --include "*.webp" --include "*.ico" \
+            --region "$AWS_REGION"
+
+          # Pass 4: sitemap + robots — 1 hour (so crawlers re-pick up new bikes)
+          aws s3 sync frontend/dist/ "s3://${FRONTEND_BUCKET}/" \
+            --cache-control "public, max-age=3600" \
+            --exclude "*" --include "sitemap.xml" --include "robots.txt" \
             --region "$AWS_REGION"
 
       - name: Invalidate CloudFront cache
