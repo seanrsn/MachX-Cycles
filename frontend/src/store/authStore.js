@@ -66,11 +66,14 @@ export const useAuthStore = create(
     }),
     {
       name: 'machx-admin-auth',
+      // Persist short-lived tokens only. refreshToken is intentionally NOT
+      // persisted: any future XSS would otherwise yield a long-lived admin
+      // credential with permanent re-auth ability. Cognito SDK keeps the
+      // refresh token in memory; admin will need to re-login on hard reload.
       partialize: state => ({
-        accessToken:  state.accessToken,
-        idToken:      state.idToken,
-        refreshToken: state.refreshToken,
-        email:        state.email,
+        accessToken: state.accessToken,
+        idToken:     state.idToken,
+        email:       state.email,
       }),
     }
   )

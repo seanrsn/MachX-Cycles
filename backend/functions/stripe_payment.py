@@ -102,9 +102,11 @@ def handle_checkout(event):
     except json.JSONDecodeError:
         return _error('Invalid JSON body')
     
-    # Step 1: Create order in database via checkout-db Lambda
+    # Step 1: Create checkout session in database via checkout-db Lambda.
+    # This does NOT create a real `orders` row — that happens only after
+    # payment_intent.succeeded fires (in stripe-webhook).
     db_payload = {
-        'action': 'create_order',
+        'action': 'create_session',
         'customer_name': body.get('customer_name'),
         'customer_email': body.get('customer_email'),
         'customer_phone': body.get('customer_phone'),
@@ -112,69 +114,76 @@ def handle_checkout(event):
         'shipping_rate_id': body.get('shipping_rate_id'),
         'items': body.get('items'),
         'promo_code': body.get('promo_code'),
+        'buyer_token': body.get('buyer_token'),
     }
-    
-    logger.info(f"Creating order for {body.get('customer_email')}")
+
+    logger.info(f"Creating checkout session for {body.get('customer_email')}")
     db_result = _invoke_checkout_db(db_payload)
     
     if 'error' in db_result:
         logger.error(f"checkout-db error: {db_result['error']}")
         # Determine appropriate status code
         err = db_result['error'].lower()
-        if 'insufficient stock' in err:
+        if (
+            'insufficient stock' in err
+            or 'already sold' in err
+            or 'currently in another shopper' in err
+            or 'just reserved' in err
+        ):
             return _error(db_result['error'], 409)
         elif 'required' in err or 'invalid' in err:
             return _error(db_result['error'], 400)
         else:
             return _error(db_result['error'], 500)
     
-    order_id = db_result['order_id']
+    session_id   = db_result['session_id']
     order_number = db_result['order_number']
-    total = db_result['total']
-    
-    logger.info(f"Order {order_number} created, total: ${total}")
-    
+    total        = db_result['total']
+
+    logger.info(f"Session {session_id} created (order_number={order_number}), total: ${total}")
+
     # Step 2: Create Stripe PaymentIntent
     client_secret = None
     try:
         stripe = _get_stripe()
-        
+
         pi = stripe.PaymentIntent.create(
             amount=int(float(total) * 100),  # cents
             currency='usd',
             automatic_payment_methods={'enabled': True},
             metadata={
-                'order_id': str(order_id),
-                'order_number': order_number,
+                'session_id':     str(session_id),
+                'order_number':   order_number,
                 'customer_email': body.get('customer_email', ''),
             },
             description=f'MachX Cycles – {order_number}',
         )
-        
+
         client_secret = pi.client_secret
-        logger.info(f"PaymentIntent {pi.id} created for order {order_number}")
-        
-        # Step 3: Update order with PaymentIntent ID
+        logger.info(f"PaymentIntent {pi.id} created for session {session_id}")
+
+        # Step 3: Store PI id on the session + extend reservation to 10 min
         update_result = _invoke_checkout_db({
-            'action': 'update_payment_intent',
-            'order_id': order_id,
+            'action': 'update_session_pi',
+            'session_id': session_id,
             'payment_intent_id': pi.id,
         })
-        
+
         if 'error' in update_result:
-            logger.warning(f"Failed to store PI ID: {update_result['error']}")
-            # Continue anyway - order exists, payment can proceed
-        
+            logger.warning(f"Failed to store PI id: {update_result['error']}")
+            # Continue anyway — session exists, payment can still proceed
+
     except Exception as e:
-        logger.error(f"Stripe error for order {order_number}: {e}")
-        # Order was created but Stripe failed - return error
-        return _error(f'Payment initialization failed: {str(e)}', 500)
-    
-    # Step 4: Return success with client_secret
+        logger.exception(f"Stripe error for session {session_id}")
+        return _error('Payment initialization failed. Please try again.', 500)
+
+    # Step 4: Return client_secret. Note: order_id intentionally not returned
+    # because no real order exists yet — only a session. Frontend uses the
+    # order_number for confirmation page lookups.
     return _response({
-        'order_id': order_id,
-        'order_number': order_number,
-        'total': total,
+        'session_id':    session_id,
+        'order_number':  order_number,
+        'total':         total,
         'client_secret': client_secret,
     }, 201)
 
