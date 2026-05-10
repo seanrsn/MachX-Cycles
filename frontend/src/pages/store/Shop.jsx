@@ -1,10 +1,15 @@
 import { useState, useEffect } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams, useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Helmet } from 'react-helmet-async'
 import { Bike, ArrowRight, SlidersHorizontal, X, Search, ChevronDown } from 'lucide-react'
 import { getBikes, getCategories, getSizes } from '../../api/public'
 import Navbar from '../../components/store/Navbar'
+import { getSize } from '../../constants/sizes'
+import { getCondition } from '../../constants/conditions'
+import { bikePath } from '../../utils/bikePath'
+import { safeJsonLd } from '../../utils/safeJsonLd'
+import { categorySlug, findCategoryBySlug, categoryPath } from '../../utils/categorySlug'
 
 const SORT_OPTIONS = [
   { value: '',           label: 'Featured'          },
@@ -15,16 +20,32 @@ const SORT_OPTIONS = [
 
 function BikeCard({ bike }) {
   const img   = bike.images?.[0]?.url || null
-  const price = bike.min_variant_price ?? bike.base_price
+  const price = bike.base_price
   const msrp  = bike.msrp
   const discount = msrp && parseFloat(msrp) > parseFloat(price)
     ? Math.round((1 - parseFloat(price) / parseFloat(msrp)) * 100)
     : null
+  const sizeMeta = bike.frame_size ? getSize(bike.frame_size) : null
+  const condMeta = bike.condition_grade ? getCondition(bike.condition_grade) : null
+  const chips = [
+    sizeMeta && { key: 'size', text: sizeMeta.label },
+    bike.material && { key: 'mat', text: bike.material },
+    condMeta && { key: 'cond', text: condMeta.label },
+  ].filter(Boolean)
   return (
-    <Link to={`/bikes/${bike.id}`} className="group bg-white rounded-2xl overflow-hidden ring-1 ring-gray-200/80 hover:ring-pink-200 hover:shadow-xl hover:shadow-pink-100/40 transition-all duration-300 hover:-translate-y-1">
-      <div className="aspect-[4/3] bg-gray-100 overflow-hidden relative">
+    <Link to={bikePath(bike)} className="group bg-white rounded-2xl overflow-hidden ring-1 ring-gray-200/80 hover:ring-pink-200 hover:shadow-xl hover:shadow-pink-100/40 transition-all duration-300 hover:-translate-y-1">
+      <div className="aspect-[4/3] bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden relative p-3">
         {img
-          ? <img src={img} alt={bike.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+          ? <img
+              src={img}
+              alt={`${bike.name} — pre-owned`}
+              loading="lazy"
+              decoding="async"
+              width="800"
+              height="600"
+              className="w-full h-full object-contain group-hover:scale-[1.04] transition-transform duration-300"
+              style={{ filter: 'drop-shadow(0 4px 12px rgba(0, 0, 0, 0.08))' }}
+            />
           : <div className="w-full h-full flex items-center justify-center"><Bike size={48} className="text-gray-300" /></div>
         }
         {discount && (
@@ -36,7 +57,19 @@ function BikeCard({ bike }) {
       <div className="p-4">
         <span className="text-xs font-medium text-pink-600 uppercase tracking-wide">{bike.category_name}</span>
         <h3 className="font-semibold text-gray-900 mt-0.5 truncate">{bike.name}</h3>
-        <div className="mt-2 flex items-center justify-between">
+        {chips.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {chips.map(c => (
+              <span
+                key={c.key}
+                className="inline-flex items-center text-[10px] font-medium text-gray-700 bg-gray-50 ring-1 ring-gray-200/80 rounded-full px-2 py-0.5"
+              >
+                {c.text}
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="font-bold text-gray-900">${parseFloat(price).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
             {msrp && parseFloat(msrp) > parseFloat(price) && (
@@ -54,8 +87,34 @@ export default function Shop() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [showFilters, setShowFilters]   = useState(false)
   const [page, setPage]                 = useState(1)
+  const navigate                        = useNavigate()
+  const { categorySlug: routeCategorySlug } = useParams()  // /shop/:categorySlug
 
-  const categoryParam = searchParams.get('category')  || ''
+  // Categories drive slug↔id resolution. Loaded early so legacy redirects work.
+  const { data: catData } = useQuery({ queryKey: ['public-categories'], queryFn: getCategories })
+  const categories = catData?.categories || []
+
+  // Resolve the active category from EITHER:
+  //   - The path slug   (/shop/road)            ← canonical
+  //   - The query string (?category=1)          ← legacy, redirects below
+  const slugCategory   = findCategoryBySlug(categories, routeCategorySlug)
+  const legacyCatParam = searchParams.get('category') || ''
+  const legacyCategory = legacyCatParam ? categories.find(c => String(c.id) === String(legacyCatParam)) : null
+  const activeCategory = slugCategory || legacyCategory
+  const categoryParam  = activeCategory ? String(activeCategory.id) : ''  // for API query
+
+  // Legacy redirect: ?category=N → /shop/{slug} (preserves other params).
+  // Runs once categories have loaded so the slug lookup works.
+  useEffect(() => {
+    if (legacyCategory && !routeCategorySlug) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('category')
+      const qs = next.toString()
+      navigate(`${categoryPath(legacyCategory)}${qs ? `?${qs}` : ''}`, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [legacyCategory, routeCategorySlug])
+
   const sizeParam     = searchParams.get('size')       || ''
   const qParam        = searchParams.get('q')          || ''
   const sortParam     = searchParams.get('sort')       || ''
@@ -111,12 +170,12 @@ export default function Shop() {
   }
 
   function setCategory(id) {
-    setSearchParams(prev => {
-      const next = new URLSearchParams(prev)
-      if (id) next.set('category', id)
-      else next.delete('category')
-      return next
-    })
+    // Category lives in the URL path now, not the query string. Preserve other
+    // filter params (size, price, q, sort) when switching categories.
+    const cat = id ? categories.find(c => String(c.id) === String(id)) : null
+    const qs = searchParams.toString()
+    const target = cat ? `/shop/${categorySlug(cat.name)}` : '/shop'
+    navigate(`${target}${qs ? `?${qs}` : ''}`)
     setShowFilters(false)
   }
 
@@ -131,18 +190,16 @@ export default function Shop() {
 
   function clearAllFilters() {
     setPriceInputs({ min: '', max: '' })
+    // Category lives in the URL path now — clearing it means going back to /shop.
     setSearchParams(prev => {
       const next = new URLSearchParams(prev)
-      next.delete('category')
       next.delete('size')
       next.delete('min_price')
       next.delete('max_price')
       return next
     })
+    if (routeCategorySlug) navigate('/shop')
   }
-
-  const { data: catData } = useQuery({ queryKey: ['public-categories'], queryFn: getCategories })
-  const categories = catData?.categories || []
 
   const { data: sizeData } = useQuery({ queryKey: ['public-sizes'], queryFn: getSizes })
   const sizes = sizeData?.sizes || []
@@ -166,23 +223,59 @@ export default function Shop() {
   const total      = data?.total  || 0
   const totalPages = data?.pages  || 1
 
-  const activeCategory    = categories.find(c => String(c.id) === String(categoryParam))
+  // activeCategory is already resolved at top of component (slug-or-legacy)
   const hasPriceFilter    = !!(minPriceParam || maxPriceParam)
   const activeFilterCount = (categoryParam ? 1 : 0) + (sizeParam ? 1 : 0) + (hasPriceFilter ? 1 : 0)
 
+  // SEO-rich page title for the H1 (we want keyword-dense, not just "All Bikes")
   const pageTitle = qParam
     ? `Results for "${qParam}"`
-    : activeCategory ? activeCategory.name : 'All Bikes'
+    : activeCategory
+      ? `Pre-Owned ${activeCategory.name} Bikes for Sale`
+      : 'Shop Pre-Owned Bikes'
+
+  // noindex any filtered/sorted/paginated view — only base category and "all"
+  // pages should be indexed. Saves crawl budget and avoids duplicate-content
+  // signals from dozens of filter permutations.
+  const hasNonCanonicalParams = !!(qParam || sizeParam || minPriceParam || maxPriceParam || sortParam || page > 1)
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Helmet>
-        <title>{activeCategory ? `${activeCategory.name} Bikes` : 'All Bikes'} | MachX Cycles</title>
+        <title>{activeCategory ? `Pre-Owned ${activeCategory.name} Bikes for Sale` : 'Shop Pre-Owned Bikes'} | MachX Cycles</title>
         <meta name="description" content={activeCategory
-          ? `Shop pre-owned ${activeCategory.name.toLowerCase()} bikes at MachX Cycles. Inspected, certified, and priced to ride.`
-          : 'Browse our selection of certified pre-owned road, mountain, and e-bikes. Premium performance without the premium price tag.'
+          ? `Shop certified pre-owned ${activeCategory.name.toLowerCase()} bikes at MachX Cycles. Inspected, tuned, and ready to ride. Trek, Specialized, Cannondale and more — ships nationwide from Brooklyn.`
+          : 'Browse certified pre-owned road, mountain, and e-bikes from MachX Cycles. Every bike inspected and tuned. Trek, Specialized, Cannondale and more — ships nationwide from Brooklyn.'
         } />
-        <link rel="canonical" href={`https://machxcycles.com/shop${categoryParam ? `?category=${categoryParam}` : ''}`} />
+        <link rel="canonical" href={`https://machxcycles.com${activeCategory ? categoryPath(activeCategory) : '/shop'}`} />
+        {hasNonCanonicalParams && <meta name="robots" content="noindex,follow" />}
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content={`${activeCategory ? `Pre-Owned ${activeCategory.name} Bikes` : 'Shop Pre-Owned Bikes'} | MachX Cycles`} />
+        <meta property="og:description" content={activeCategory
+          ? `Pre-owned ${activeCategory.name.toLowerCase()} bikes — inspected, tuned, ride-ready. Ships nationwide from Brooklyn.`
+          : 'Pre-owned road, mountain, and e-bikes. Inspected, tuned, ride-ready.'
+        } />
+        <meta property="og:url" content={`https://machxcycles.com${activeCategory ? categoryPath(activeCategory) : '/shop'}`} />
+        <meta property="og:image" content="https://machxcycles.com/MachXPic.jpg" />
+        <meta name="twitter:title" content={`${activeCategory ? `Pre-Owned ${activeCategory.name} Bikes` : 'Shop Pre-Owned Bikes'} | MachX Cycles`} />
+        <meta name="twitter:description" content={activeCategory ? `Pre-owned ${activeCategory.name.toLowerCase()} bikes. Inspected, tuned, ride-ready.` : 'Pre-owned road, mountain, and e-bikes.'} />
+        <meta name="twitter:image" content="https://machxcycles.com/MachXPic.jpg" />
+        <script type="application/ld+json">
+          {safeJsonLd({
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+              { "@type": "ListItem", "position": 1, "name": "Home",  "item": "https://machxcycles.com/" },
+              { "@type": "ListItem", "position": 2, "name": "Shop",  "item": "https://machxcycles.com/shop" },
+              ...(activeCategory ? [{
+                "@type": "ListItem",
+                "position": 3,
+                "name": activeCategory.name,
+                "item": `https://machxcycles.com${categoryPath(activeCategory)}`
+              }] : [])
+            ]
+          })}
+        </script>
       </Helmet>
       <Navbar />
 
@@ -221,7 +314,7 @@ export default function Shop() {
         <div className="flex items-center justify-between mb-6 gap-3">
           <div className="min-w-0">
             <h1 className="text-2xl font-bold text-gray-900 truncate">{pageTitle}</h1>
-            {!isLoading && <p className="text-sm text-gray-500 mt-0.5">{total} bike{total !== 1 ? 's' : ''}</p>}
+            {!isLoading && <p className="text-sm text-gray-500 mt-0.5">{total} bike{total !== 1 ? 's' : ''} · ships nationwide from Brooklyn</p>}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {/* Sort dropdown */}
@@ -288,9 +381,13 @@ export default function Shop() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button onClick={() => setSize('')} className={`px-4 py-1.5 rounded-full text-sm font-medium border transition-colors ${!sizeParam ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-300 text-gray-700 hover:border-pink-500'}`}>All</button>
-                  {sizes.map(s => (
-                    <button key={s} onClick={() => setSize(s)} className={`px-4 py-1.5 rounded-full text-sm font-medium border transition-colors ${s === sizeParam ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-300 text-gray-700 hover:border-pink-500'}`}>{s}</button>
-                  ))}
+                  {sizes.map(s => {
+                    const code  = typeof s === 'string' ? s : s.code
+                    const label = typeof s === 'string' ? s : s.label
+                    return (
+                      <button key={code} onClick={() => setSize(code)} className={`px-4 py-1.5 rounded-full text-sm font-medium border transition-colors ${code === sizeParam ? 'border-pink-600 bg-pink-600 text-white' : 'border-gray-300 text-gray-700 hover:border-pink-500'}`}>{label}</button>
+                    )
+                  })}
                 </div>
               </div>
             )}
@@ -426,12 +523,12 @@ export default function Shop() {
               {recentlyViewed.map(b => (
                 <Link
                   key={b.id}
-                  to={`/bikes/${b.id}`}
+                  to={bikePath(b)}
                   className="shrink-0 w-44 bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow"
                 >
                   <div className="h-28 bg-gray-100 overflow-hidden">
                     {b.imageUrl
-                      ? <img src={b.imageUrl} alt={b.name} className="w-full h-full object-cover" />
+                      ? <img src={b.imageUrl} alt={`${b.name} — pre-owned`} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                       : <div className="w-full h-full flex items-center justify-center"><Bike size={28} className="text-gray-300" /></div>
                     }
                   </div>

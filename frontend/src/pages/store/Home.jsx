@@ -1,23 +1,34 @@
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Helmet } from 'react-helmet-async'
-import { ArrowRight, Bike, CheckCircle, Truck, Search, Shield, Headphones, Trophy, RotateCcw } from 'lucide-react'
+import { ArrowRight, Bike, CheckCircle, Truck, Search, Shield, Headphones, Trophy, RotateCcw, Star, Wrench, Calendar } from 'lucide-react'
 import { getBikes, getCategories } from '../../api/public'
 import Navbar from '../../components/store/Navbar'
 import Footer from '../../components/store/Footer'
+import { bikePath } from '../../utils/bikePath'
+import { safeJsonLd } from '../../utils/safeJsonLd'
 
 function BikeCard({ bike }) {
   const img = bike.images?.[0]?.url || null
-  const price = bike.min_variant_price ?? bike.base_price
+  const price = bike.base_price
   const msrp = bike.msrp
   const discount = msrp && parseFloat(msrp) > parseFloat(price)
     ? Math.round((1 - parseFloat(price) / parseFloat(msrp)) * 100)
     : null
   return (
-    <Link to={`/bikes/${bike.id}`} className="group bg-white rounded-2xl overflow-hidden ring-1 ring-gray-200/80 hover:ring-pink-200 hover:shadow-xl hover:shadow-pink-100/40 transition-all duration-300 hover:-translate-y-1">
-      <div className="aspect-[4/3] bg-gray-100 overflow-hidden relative">
+    <Link to={bikePath(bike)} className="group bg-white rounded-2xl overflow-hidden ring-1 ring-gray-200/80 hover:ring-pink-200 hover:shadow-xl hover:shadow-pink-100/40 transition-all duration-300 hover:-translate-y-1">
+      <div className="aspect-[4/3] bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden relative p-3">
         {img
-          ? <img src={img} alt={bike.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+          ? <img
+              src={img}
+              alt={`${bike.name} — pre-owned`}
+              loading="lazy"
+              decoding="async"
+              width="800"
+              height="600"
+              className="w-full h-full object-contain group-hover:scale-[1.04] transition-transform duration-300"
+              style={{ filter: 'drop-shadow(0 4px 12px rgba(0, 0, 0, 0.08))' }}
+            />
           : <div className="w-full h-full flex items-center justify-center"><Bike size={48} className="text-gray-300" /></div>
         }
         {discount && (
@@ -55,26 +66,74 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Helmet>
-        <title>MachX Cycles | Premium Pre-Owned Performance Bikes</title>
-        <meta name="description" content="Shop premium pre-owned road, mountain, and e-bikes at unbeatable prices. Every bike inspected, certified, and ships ride-ready. Premium performance without the premium price tag." />
+        <title>Pre-Owned Performance Bikes in Brooklyn, NY | MachX Cycles</title>
+        <meta name="description" content="Certified pre-owned road, mountain, and e-bikes — Trek, Specialized, Cannondale, and more. Every bike inspected and tuned in our Brooklyn shop. Nationwide shipping." />
         <link rel="canonical" href="https://machxcycles.com/" />
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="Pre-Owned Performance Bikes in Brooklyn, NY | MachX Cycles" />
+        <meta property="og:description" content="Certified pre-owned road, mountain, and e-bikes. Inspected, tuned, and ready to ride. Ships nationwide from Brooklyn." />
+        <meta property="og:url" content="https://machxcycles.com/" />
+        <meta property="og:image" content="https://machxcycles.com/MachXPic.jpg" />
+        <meta name="twitter:title" content="Pre-Owned Performance Bikes in Brooklyn, NY | MachX Cycles" />
+        <meta name="twitter:description" content="Certified pre-owned road, mountain, and e-bikes. Ships nationwide from Brooklyn." />
+        <meta name="twitter:image" content="https://machxcycles.com/MachXPic.jpg" />
         <script type="application/ld+json">
-          {JSON.stringify({
+          {safeJsonLd({
             "@context": "https://schema.org",
-            "@type": "Organization",
+            "@type": "BicycleStore",
             "name": "MachX Cycles",
-            "url": "https://machxcycles.com",
+            "url": "https://machxcycles.com/",
             "logo": "https://machxcycles.com/logo.png",
-            "description": "Premium pre-owned performance bikes at unbeatable prices",
+            "image": "https://machxcycles.com/MachXPic.jpg",
+            "description": "Certified pre-owned performance bicycles. Inspected, tuned, and ride-ready. Ships nationwide from Brooklyn, NY.",
+            "telephone": "+1-718-218-4464",
+            "email": "info@machxcycles.com",
+            "priceRange": "$$-$$$",
+            "address": {
+              "@type": "PostalAddress",
+              "streetAddress": "3149 Emmons Ave",
+              "addressLocality": "Brooklyn",
+              "addressRegion": "NY",
+              "postalCode": "11235",
+              "addressCountry": "US"
+            },
+            "openingHoursSpecification": [
+              { "@type": "OpeningHoursSpecification", "dayOfWeek": "Wednesday", "opens": "18:30", "closes": "20:30" },
+              { "@type": "OpeningHoursSpecification", "dayOfWeek": ["Thursday","Friday"], "opens": "10:00", "closes": "18:00" },
+              { "@type": "OpeningHoursSpecification", "dayOfWeek": ["Saturday","Sunday"], "opens": "10:00", "closes": "16:00" }
+            ],
+            "parentOrganization": {
+              "@type": "BicycleStore",
+              "name": "Brooklyn Bikery",
+              "url": "https://brooklynbikery.com",
+              "address": {
+                "@type": "PostalAddress",
+                "streetAddress": "3149 Emmons Ave",
+                "addressLocality": "Brooklyn",
+                "addressRegion": "NY",
+                "postalCode": "11235",
+                "addressCountry": "US"
+              },
+              "aggregateRating": {
+                "@type": "AggregateRating",
+                "ratingValue": "4.9",
+                "reviewCount": "200"
+              }
+            },
             "sameAs": []
           })}
         </script>
         <script type="application/ld+json">
-          {JSON.stringify({
+          {safeJsonLd({
             "@context": "https://schema.org",
             "@type": "WebSite",
             "name": "MachX Cycles",
-            "url": "https://machxcycles.com"
+            "url": "https://machxcycles.com/",
+            "potentialAction": {
+              "@type": "SearchAction",
+              "target": "https://machxcycles.com/shop?q={search_term_string}",
+              "query-input": "required name=search_term_string"
+            }
           })}
         </script>
       </Helmet>
@@ -101,6 +160,30 @@ export default function Home() {
               <Link to="/track-order" className="inline-flex items-center gap-2 border border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white px-8 py-3.5 rounded-xl font-semibold transition-colors">
                 Track Order
               </Link>
+            </div>
+
+            {/* Trust strip — Brooklyn Bikery partnership */}
+            <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-2.5 text-xs text-gray-500">
+              <span className="flex items-center gap-1.5">
+                <Wrench size={14} className="text-gray-400" strokeWidth={1.75} />
+                Powered by{' '}
+                <a
+                  href="https://brooklynbikery.com"
+                  target="_blank"
+                  rel="noopener"
+                  className="font-semibold text-gray-300 hover:text-white transition-colors"
+                >
+                  Brooklyn Bikery
+                </a>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Star size={14} className="text-yellow-500 fill-yellow-500" />
+                <span><span className="text-gray-300 font-semibold">4.9</span> from 200+ Google reviews</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Calendar size={14} className="text-gray-400" strokeWidth={1.75} />
+                Brooklyn shop since <span className="text-gray-300 font-semibold">2020</span>
+              </span>
             </div>
           </div>
         </div>
@@ -134,7 +217,7 @@ export default function Home() {
           <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
             <Link to="/shop" className="shrink-0 px-5 py-2.5 rounded-full border-2 border-pink-600 text-pink-600 font-semibold text-sm hover:bg-pink-600 hover:text-white transition-colors">All</Link>
             {categories.map(c => (
-              <Link key={c.id} to={`/shop?category=${c.id}`} className="shrink-0 px-5 py-2.5 rounded-full border border-gray-300 text-gray-700 font-medium text-sm hover:border-pink-600 hover:text-pink-600 transition-colors">
+              <Link key={c.id} to={`/shop/${c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}`} className="shrink-0 px-5 py-2.5 rounded-full border border-gray-300 text-gray-700 font-medium text-sm hover:border-pink-600 hover:text-pink-600 transition-colors">
                 {c.name}
               </Link>
             ))}

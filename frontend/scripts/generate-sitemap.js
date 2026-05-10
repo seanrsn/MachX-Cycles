@@ -19,15 +19,19 @@ const STATIC = [
   { url: '/track-order', changefreq: 'monthly', priority: '0.3' },
 ]
 
+// Mirrors src/utils/categorySlug.js — keep in sync.
+function categorySlug(name) {
+  return String(name || '')
+    .toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
 async function generate() {
   console.log('Generating sitemap.xml...')
 
-  // Category landing pages are intentionally NOT in the sitemap right now:
-  // /shop?category=N URLs all serve the same prerendered /shop/index.html
-  // (query strings can't be filenames in the prerender). Listing them would
-  // signal duplicate-content to Google. Re-add when prerender supports them.
-
   let bikePages = []
+  let categoryPages = []
   const todayIso = new Date().toISOString().split('T')[0]
   try {
     const res  = await fetch(`${API}/bikes?limit=500`)
@@ -57,8 +61,30 @@ async function generate() {
     console.warn('   Could not fetch bikes:', err.message, '- using static pages only')
   }
 
+  // Per-category landing pages — /shop/road, /shop/mountain, /shop/e-bikes, etc.
+  // Each is prerendered to its own folder by scripts/prerender.js with proper
+  // canonical + meta tags. Listing them lets Google rank "used road bikes
+  // Brooklyn"-style queries against the dedicated pages.
+  try {
+    const res  = await fetch(`${API}/categories`)
+    const data = await res.json()
+    categoryPages = (data.categories || [])
+      .map(c => ({ slug: categorySlug(c.name), name: c.name }))
+      .filter(c => c.slug)
+      .map(c => ({
+        url:        `/shop/${c.slug}`,
+        lastmod:    todayIso,
+        changefreq: 'daily',
+        priority:   '0.85',
+      }))
+    console.log(`   Found ${categoryPages.length} categories`)
+  } catch (err) {
+    console.warn('   Could not fetch categories:', err.message)
+  }
+
   const all = [
     ...STATIC.map(s => ({ ...s, lastmod: todayIso })),
+    ...categoryPages,
     ...bikePages,
   ]
 

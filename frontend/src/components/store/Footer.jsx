@@ -15,6 +15,18 @@ export default function Footer() {
             <p className="text-gray-400 text-sm leading-relaxed">
               Premium pre-owned bikes at unbeatable prices.
             </p>
+            <p className="text-gray-500 text-xs mt-3 leading-relaxed">
+              Powered by{' '}
+              <a
+                href="https://brooklynbikery.com"
+                target="_blank"
+                rel="noopener"
+                className="text-pink-400 hover:text-pink-300 underline-offset-2 hover:underline transition-colors"
+              >
+                Brooklyn Bikery
+              </a>
+              {' '}— Brooklyn's trusted bike shop since 2020.
+            </p>
           </div>
 
           {/* Shop */}
@@ -22,9 +34,9 @@ export default function Footer() {
             <h4 className="font-semibold text-sm uppercase tracking-wide text-gray-400 mb-4">Shop</h4>
             <ul className="space-y-2 text-sm">
               <li><Link to="/shop" className="text-gray-300 hover:text-white transition-colors">All Bikes</Link></li>
-              <li><Link to="/shop?category=1" className="text-gray-300 hover:text-white transition-colors">Road</Link></li>
-              <li><Link to="/shop?category=2" className="text-gray-300 hover:text-white transition-colors">Mountain</Link></li>
-              <li><Link to="/shop?category=6" className="text-gray-300 hover:text-white transition-colors">E-Bikes</Link></li>
+              <li><Link to="/shop/road" className="text-gray-300 hover:text-white transition-colors">Road</Link></li>
+              <li><Link to="/shop/mountain" className="text-gray-300 hover:text-white transition-colors">Mountain</Link></li>
+              <li><Link to="/shop/e-bikes" className="text-gray-300 hover:text-white transition-colors">E-Bikes</Link></li>
             </ul>
           </div>
 
