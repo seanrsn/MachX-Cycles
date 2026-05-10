@@ -7,6 +7,7 @@ import Navbar from '../../components/store/Navbar'
 import Footer from '../../components/store/Footer'
 import { bikePath } from '../../utils/bikePath'
 import { safeJsonLd } from '../../utils/safeJsonLd'
+import { categoryPath } from '../../utils/categorySlug'
 
 function BikeCard({ bike }) {
   const img = bike.images?.[0]?.url || null
@@ -217,7 +218,7 @@ export default function Home() {
           <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
             <Link to="/shop" className="shrink-0 px-5 py-2.5 rounded-full border-2 border-pink-600 text-pink-600 font-semibold text-sm hover:bg-pink-600 hover:text-white transition-colors">All</Link>
             {categories.map(c => (
-              <Link key={c.id} to={`/shop/${c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}`} className="shrink-0 px-5 py-2.5 rounded-full border border-gray-300 text-gray-700 font-medium text-sm hover:border-pink-600 hover:text-pink-600 transition-colors">
+              <Link key={c.id} to={categoryPath(c)} className="shrink-0 px-5 py-2.5 rounded-full border border-gray-300 text-gray-700 font-medium text-sm hover:border-pink-600 hover:text-pink-600 transition-colors">
                 {c.name}
               </Link>
             ))}

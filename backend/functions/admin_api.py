@@ -182,7 +182,9 @@ def _route(method, path, event):
         if method == 'GET': return get_settings()
         if method == 'PUT': return update_settings(event)
 
-    return error(f'Route not found: {method} {path}', status=404)
+    # Don't reflect attacker-controlled path in the response — log it instead.
+    print(f"admin_api 404: {method} {path}")
+    return error('Not found', status=404)
 
 
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

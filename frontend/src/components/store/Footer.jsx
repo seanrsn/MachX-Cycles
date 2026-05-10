@@ -36,7 +36,7 @@ export default function Footer() {
               <li><Link to="/shop" className="text-gray-300 hover:text-white transition-colors">All Bikes</Link></li>
               <li><Link to="/shop/road" className="text-gray-300 hover:text-white transition-colors">Road</Link></li>
               <li><Link to="/shop/mountain" className="text-gray-300 hover:text-white transition-colors">Mountain</Link></li>
-              <li><Link to="/shop/e-bikes" className="text-gray-300 hover:text-white transition-colors">E-Bikes</Link></li>
+              <li><Link to="/shop/e-bike" className="text-gray-300 hover:text-white transition-colors">E-Bikes</Link></li>
             </ul>
           </div>
 

@@ -227,11 +227,21 @@ export default function Shop() {
   const hasPriceFilter    = !!(minPriceParam || maxPriceParam)
   const activeFilterCount = (categoryParam ? 1 : 0) + (sizeParam ? 1 : 0) + (hasPriceFilter ? 1 : 0)
 
+  // Smart pluralization: don't append " Bikes" if the category name already
+  // contains "bike" (so "E-Bike" → "E-Bikes", not "E-Bike Bikes").
+  function categoryHeading(name) {
+    if (/bike/i.test(name)) {
+      // Already mentions bike — pluralize if not already plural
+      return name.endsWith('s') ? name : `${name}s`
+    }
+    return `${name} Bikes`
+  }
+
   // SEO-rich page title for the H1 (we want keyword-dense, not just "All Bikes")
   const pageTitle = qParam
     ? `Results for "${qParam}"`
     : activeCategory
-      ? `Pre-Owned ${activeCategory.name} Bikes for Sale`
+      ? `Pre-Owned ${categoryHeading(activeCategory.name)} for Sale`
       : 'Shop Pre-Owned Bikes'
 
   // noindex any filtered/sorted/paginated view — only base category and "all"
@@ -242,23 +252,23 @@ export default function Shop() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Helmet>
-        <title>{activeCategory ? `Pre-Owned ${activeCategory.name} Bikes for Sale` : 'Shop Pre-Owned Bikes'} | MachX Cycles</title>
+        <title>{activeCategory ? `Pre-Owned ${categoryHeading(activeCategory.name)} for Sale` : 'Shop Pre-Owned Bikes'} | MachX Cycles</title>
         <meta name="description" content={activeCategory
-          ? `Shop certified pre-owned ${activeCategory.name.toLowerCase()} bikes at MachX Cycles. Inspected, tuned, and ready to ride. Trek, Specialized, Cannondale and more — ships nationwide from Brooklyn.`
+          ? `Shop certified pre-owned ${categoryHeading(activeCategory.name).toLowerCase()} at MachX Cycles. Inspected, tuned, and ready to ride. Trek, Specialized, Cannondale and more — ships nationwide from Brooklyn.`
           : 'Browse certified pre-owned road, mountain, and e-bikes from MachX Cycles. Every bike inspected and tuned. Trek, Specialized, Cannondale and more — ships nationwide from Brooklyn.'
         } />
         <link rel="canonical" href={`https://machxcycles.com${activeCategory ? categoryPath(activeCategory) : '/shop'}`} />
         {hasNonCanonicalParams && <meta name="robots" content="noindex,follow" />}
         <meta property="og:type" content="website" />
-        <meta property="og:title" content={`${activeCategory ? `Pre-Owned ${activeCategory.name} Bikes` : 'Shop Pre-Owned Bikes'} | MachX Cycles`} />
+        <meta property="og:title" content={`${activeCategory ? `Pre-Owned ${categoryHeading(activeCategory.name)}` : 'Shop Pre-Owned Bikes'} | MachX Cycles`} />
         <meta property="og:description" content={activeCategory
-          ? `Pre-owned ${activeCategory.name.toLowerCase()} bikes — inspected, tuned, ride-ready. Ships nationwide from Brooklyn.`
+          ? `Pre-owned ${categoryHeading(activeCategory.name).toLowerCase()} — inspected, tuned, ride-ready. Ships nationwide from Brooklyn.`
           : 'Pre-owned road, mountain, and e-bikes. Inspected, tuned, ride-ready.'
         } />
         <meta property="og:url" content={`https://machxcycles.com${activeCategory ? categoryPath(activeCategory) : '/shop'}`} />
         <meta property="og:image" content="https://machxcycles.com/MachXPic.jpg" />
-        <meta name="twitter:title" content={`${activeCategory ? `Pre-Owned ${activeCategory.name} Bikes` : 'Shop Pre-Owned Bikes'} | MachX Cycles`} />
-        <meta name="twitter:description" content={activeCategory ? `Pre-owned ${activeCategory.name.toLowerCase()} bikes. Inspected, tuned, ride-ready.` : 'Pre-owned road, mountain, and e-bikes.'} />
+        <meta name="twitter:title" content={`${activeCategory ? `Pre-Owned ${categoryHeading(activeCategory.name)}` : 'Shop Pre-Owned Bikes'} | MachX Cycles`} />
+        <meta name="twitter:description" content={activeCategory ? `Pre-owned ${categoryHeading(activeCategory.name).toLowerCase()}. Inspected, tuned, ride-ready.` : 'Pre-owned road, mountain, and e-bikes.'} />
         <meta name="twitter:image" content="https://machxcycles.com/MachXPic.jpg" />
         <script type="application/ld+json">
           {safeJsonLd({

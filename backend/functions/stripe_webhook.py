@@ -27,7 +27,7 @@ _stripe_keys = None
 _twilio_creds = None
 
 # Phone number to notify on new orders (can also be env var)
-NOTIFY_PHONE = os.environ.get('NOTIFY_PHONE', '+17182184464')
+NOTIFY_PHONE = os.environ.get('NOTIFY_PHONE', '+19177530685')
 
 
 def _get_stripe_keys():
@@ -119,110 +119,360 @@ def handler(event, context):
         return error('Invalid signature', status=400)
     except Exception as e:
         logger.error(f"Webhook parse error: {e}")
-        return error(f'Webhook error: {e}', status=400)
+        return error('Invalid webhook payload', status=400)
 
     event_type = evt['type']
+    event_id   = evt['id']
     pi         = evt['data']['object']
-    logger.info(f"Stripe event: {event_type} | PI: {pi.get('id')}")
+    logger.info(f"Stripe event: {event_type} | id: {event_id} | PI: {pi.get('id')}")
 
-    if event_type == 'payment_intent.succeeded':
-        _handle_payment_succeeded(pi)
+    # Idempotency: if we've already processed this event id, return 200 without
+    # re-running side-effects. Stripe retries on any non-2xx and replays signed
+    # events within tolerance; without this check, retries double-fulfill.
+    if not _claim_event(event_id, event_type):
+        logger.info(f"Event {event_id} already processed — skipping")
+        return success({'received': True, 'duplicate': True})
+
+    if event_type == 'payment_intent.processing':
+        _handle_payment_processing(pi, secret_key)
+    elif event_type == 'payment_intent.succeeded':
+        _handle_payment_succeeded(pi, secret_key)
     elif event_type == 'payment_intent.payment_failed':
         _handle_payment_failed(pi)
+    elif event_type == 'payment_intent.canceled':
+        _handle_payment_canceled(pi)
     else:
         logger.info(f"Unhandled event type (ignored): {event_type}")
 
     return success({'received': True})
 
 
+def _claim_event(event_id: str, event_type: str) -> bool:
+    """Atomically claim an event for processing. Returns True if this is the
+    first time we've seen it, False if it's a duplicate. INSERT IGNORE relies
+    on processed_stripe_events.event_id being PRIMARY KEY."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT IGNORE INTO processed_stripe_events (event_id, event_type) VALUES (%s, %s)",
+                (event_id, event_type)
+            )
+            inserted = cur.rowcount == 1
+        conn.commit()
+        return inserted
+    except Exception as e:
+        logger.error(f"Failed to claim event {event_id}: {e}")
+        # On error, fail-open (process the event) — better to risk a duplicate
+        # than to silently drop a real payment. The DB constraint still prevents
+        # actual double-inserts in the side-effect tables.
+        return True
+
+
 # ── Event handlers ────────────────────────────────────────────────────────────
 
-def _handle_payment_succeeded(pi):
+def _handle_payment_processing(pi, secret_key):
+    """payment_intent.processing fires when the buyer clicks Pay in the Stripe
+    form (before the card auth completes). Upgrade reservation to a permanent
+    lock. If the session lost its reservation (TTL expired, race), cancel the
+    PI before authorization to avoid charging."""
     pi_id = pi['id']
     conn  = get_connection()
     conn.commit()
 
-    order_info = None
-
     try:
         with conn.cursor() as cur:
-            # Get full order details for notification
             cur.execute(
-                """
-                SELECT o.id, o.order_number, o.customer_name, o.customer_email,
-                       o.customer_phone, o.total, o.shipping_address
-                FROM orders o
-                WHERE o.stripe_payment_intent_id = %s
-                """,
+                "SELECT id, order_number, items FROM checkout_sessions WHERE stripe_payment_intent_id = %s AND status = 'active'",
                 (pi_id,)
             )
-            order = cur.fetchone()
-            if not order:
-                logger.warning(f"payment_intent.succeeded: no order for PI {pi_id}")
+            session = cur.fetchone()
+            if not session:
+                logger.warning(f"payment_intent.processing: no active session for PI {pi_id}")
                 return
 
-            # Get order items
-            cur.execute(
-                """
-                SELECT b.name AS bike_name, oi.quantity, oi.frame_size, oi.color
-                FROM order_items oi
-                JOIN bikes b ON b.id = oi.bike_id
-                WHERE oi.order_id = %s
-                """,
-                (order['id'],)
-            )
-            items = cur.fetchall()
-
-            # Update order status
-            cur.execute(
-                """
-                UPDATE orders
-                SET payment_status = 'paid',
-                    status = 'confirmed',
-                    stripe_latest_charge_id = %s
-                WHERE id = %s
-                """,
-                (pi.get('latest_charge'), order['id'])
-            )
-            
-            # Mark bike as sold
-            cur.execute(
-                "UPDATE bikes SET sold = TRUE WHERE id = (SELECT bike_id FROM order_items WHERE order_id = %s LIMIT 1)",
-                (order['id'],)
-            )
+            session_id = session['id']
+            session_no = session['order_number']
+            items = json.loads(session['items']) if isinstance(session['items'], str) else session['items']
+            expected = len(items)
 
             cur.execute(
                 """
-                INSERT INTO order_events (order_id, event_type, message, metadata)
-                VALUES (%s, 'payment_intent.succeeded', 'Payment confirmed — order is processing', %s)
+                UPDATE bikes
+                SET reservation_state = 'processing',
+                    reserved_until = NULL
+                WHERE reservation_session_id = %s AND sold = 0
                 """,
-                (order['id'], json.dumps({'payment_intent_id': pi_id}))
+                (session_id,)
             )
+            owned = cur.rowcount
 
-            order_info = {
-                'order_number': order['order_number'],
-                'customer_name': order['customer_name'],
-                'customer_email': order['customer_email'],
-                'customer_phone': order['customer_phone'],
-                'total': float(order['total']),
-                'items': items,
-                'shipping_address': order['shipping_address'],
-            }
+            if owned < expected:
+                logger.warning(
+                    f"Race lost during processing: session {session_no} owns {owned}/{expected} reservations. Canceling PI."
+                )
+                _cancel_payment_intent(pi_id, secret_key)
+                # Roll back any partial wins — the bikes we DID promote to
+                # 'processing' would be stuck with no TTL and a now-abandoned
+                # session id. Release them so the next buyer can grab them.
+                cur.execute(
+                    """
+                    UPDATE bikes
+                    SET reservation_state = 'none',
+                        reserved_until = NULL,
+                        reservation_session_id = NULL
+                    WHERE reservation_session_id = %s AND sold = 0
+                    """,
+                    (session_id,)
+                )
+                cur.execute(
+                    "UPDATE checkout_sessions SET status = 'abandoned' WHERE id = %s",
+                    (session_id,)
+                )
+            else:
+                logger.info(f"Session {session_no} reservation locked (processing)")
 
         conn.commit()
-        logger.info(f"Order {order['order_number']} marked paid / confirmed")
 
     except Exception:
         conn.rollback()
         raise
 
-    # Send SMS notification (after DB commit)
+
+def _cancel_payment_intent(pi_id: str, secret_key: str):
+    """Cancel a PaymentIntent before charge completes. Stripe allows cancel
+    from `processing` state but not from `succeeded` — so this is best-effort
+    and may fail if the auth completed first. If it fails, the succeeded
+    handler will catch the race and refund instead.
+
+    Idempotency key prevents a webhook retry from issuing a second cancel
+    request (Stripe would reject but it's noise in logs)."""
+    try:
+        import stripe
+        stripe.api_key = secret_key
+        stripe.PaymentIntent.cancel(
+            pi_id,
+            cancellation_reason='abandoned',
+            idempotency_key=f'cancel-{pi_id}',
+        )
+        logger.info(f"PI {pi_id} canceled (race-lost during processing)")
+    except Exception as e:
+        logger.error(f"Failed to cancel PI {pi_id}: {e} — succeeded handler will refund if charge completes")
+
+
+def _handle_payment_succeeded(pi, secret_key):
+    """Materialize the checkout session into a real order. This is the only
+    path that creates rows in `orders` / `order_items` — every row in those
+    tables represents a real, paid order."""
+    pi_id = pi['id']
+    conn  = get_connection()
+    conn.commit()
+
+    order_info       = None
+    race_lost        = False
+    fake_order_for_refund = None  # used by _refund_race_loser if race detected
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, order_number, buyer_token, customer_name, customer_email,
+                       customer_phone, shipping_address, shipping_rate_id, shipping_fee,
+                       subtotal, discount_amount, total, promo_code, items, status,
+                       converted_to_order_id
+                FROM checkout_sessions
+                WHERE stripe_payment_intent_id = %s
+                """,
+                (pi_id,)
+            )
+            session = cur.fetchone()
+            if not session:
+                logger.warning(f"payment_intent.succeeded: no session for PI {pi_id}")
+                return
+
+            session_id = session['id']
+            order_number = session['order_number']
+
+            # If session is already converted (duplicate webhook), no-op. The
+            # idempotency table at the top of handler() should catch this, but
+            # belt-and-suspenders.
+            if session['status'] == 'converted':
+                cur.execute(
+                    "SELECT id FROM orders WHERE order_number = %s",
+                    (order_number,)
+                )
+                existing = cur.fetchone()
+                logger.info(f"Session {order_number} already converted to order {existing['id'] if existing else 'unknown'}")
+                return
+
+            items = json.loads(session['items']) if isinstance(session['items'], str) else session['items']
+            expected = len(items)
+            bike_ids = [i['bike_id'] for i in items]
+
+            # Atomically mark bikes sold — but only if this session still owns
+            # the reservation. If another session took over (race), rowcount
+            # will be < expected and we refund.
+            cur.execute(
+                """
+                UPDATE bikes
+                SET sold = 1,
+                    reservation_state = 'sold',
+                    reserved_until = NULL
+                WHERE reservation_session_id = %s
+                  AND sold = 0
+                """,
+                (session_id,)
+            )
+            owned = cur.rowcount
+
+            if owned < expected:
+                race_lost = True
+                logger.error(
+                    f"RACE LOST AT SUCCEEDED: session {order_number} got {owned}/{expected} bikes sold, refunding"
+                )
+                cur.execute(
+                    "UPDATE checkout_sessions SET status = 'abandoned' WHERE id = %s",
+                    (session_id,)
+                )
+                # Use session data as a stand-in for the "order" passed to refund handler
+                fake_order_for_refund = {
+                    'id':             None,
+                    'order_number':   order_number,
+                    'customer_email': session['customer_email'],
+                    'customer_name':  session['customer_name'],
+                    'total':          session['total'],
+                }
+            else:
+                # MATERIALIZE: insert the real order + order_items.
+                shipping_address_json = session['shipping_address']
+                if isinstance(shipping_address_json, dict):
+                    shipping_address_json = json.dumps(shipping_address_json)
+
+                cur.execute(
+                    """
+                    INSERT INTO orders
+                        (order_number, customer_name, customer_email, customer_phone,
+                         fulfillment_type, payment_type,
+                         shipping_address, shipping_fee, subtotal, discount_amount, total,
+                         stripe_payment_intent_id, stripe_latest_charge_id,
+                         payment_status, status, notes)
+                    VALUES (%s, %s, %s, %s, 'ship', 'full',
+                            %s, %s, %s, %s, %s,
+                            %s, %s,
+                            'paid', 'confirmed', NULL)
+                    """,
+                    (
+                        order_number,
+                        session['customer_name'],
+                        session['customer_email'],
+                        session['customer_phone'],
+                        shipping_address_json,
+                        session['shipping_fee'],
+                        session['subtotal'],
+                        session['discount_amount'],
+                        session['total'],
+                        pi_id,
+                        pi.get('latest_charge'),
+                    )
+                )
+                order_id = cur.lastrowid
+
+                # order_items: one per bike
+                for it in items:
+                    cur.execute(
+                        """
+                        INSERT INTO order_items
+                            (order_id, bike_id, quantity, unit_price)
+                        VALUES (%s, %s, %s, %s)
+                        """,
+                        (
+                            order_id,
+                            it['bike_id'],
+                            it.get('quantity', 1),
+                            it['unit_price'],
+                        )
+                    )
+
+                # Audit
+                cur.execute(
+                    """
+                    INSERT INTO order_events (order_id, event_type, message, metadata)
+                    VALUES (%s, 'created', 'Order materialized from checkout session on payment success', %s)
+                    """,
+                    (order_id, json.dumps({'session_id': session_id, 'payment_intent_id': pi_id}))
+                )
+                cur.execute(
+                    """
+                    INSERT INTO order_events (order_id, event_type, message, metadata)
+                    VALUES (%s, 'payment_intent.succeeded', 'Payment confirmed — order is processing', %s)
+                    """,
+                    (order_id, json.dumps({'payment_intent_id': pi_id}))
+                )
+
+                # Mark session as converted
+                cur.execute(
+                    "UPDATE checkout_sessions SET status = 'converted', converted_to_order_id = %s WHERE id = %s",
+                    (order_id, session_id)
+                )
+
+                # Atomic promo usage increment. WHERE max_uses IS NULL OR
+                # usage_count < max_uses ensures we never exceed the cap even
+                # under simultaneous redemptions. If rowcount is 0 the cap was
+                # hit between session-create-time validation and now — log it,
+                # but the order still stands (we already validated at create
+                # time and the buyer paid).
+                if session.get('promo_code'):
+                    cur.execute(
+                        """
+                        UPDATE promotions
+                        SET usage_count = usage_count + 1
+                        WHERE promo_code = %s
+                          AND is_active = 1
+                          AND (max_uses IS NULL OR usage_count < max_uses)
+                        """,
+                        (session['promo_code'],)
+                    )
+                    if cur.rowcount == 0:
+                        logger.warning(
+                            f"Promo {session['promo_code']} usage_count not incremented for order {order_number} — promo may have hit its cap or been deactivated"
+                        )
+
+                order_info = {
+                    'order_number':     order_number,
+                    'customer_name':    session['customer_name'],
+                    'customer_email':   session['customer_email'],
+                    'customer_phone':   session['customer_phone'],
+                    'total':            float(session['total']),
+                    'items':            [
+                        {
+                            'bike_name': it.get('bike_name', f"Bike #{it.get('bike_id')}"),
+                            'quantity':  it.get('quantity', 1),
+                        }
+                        for it in items
+                    ],
+                    'shipping_address': session['shipping_address'],
+                }
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    # Race-lost path: refund the buyer + alert admin
+    if race_lost:
+        _refund_race_loser(pi_id, fake_order_for_refund, secret_key)
+        return
+
+    logger.info(f"Order {order_number} materialized, marked paid / confirmed")
+
+    # Happy-path SMS notification (after DB commit)
     if order_info:
         items_text = ", ".join([
-            f"{i['bike_name']} ({i['frame_size']}/{i['color']}) x{i['quantity']}"
+            f"{i['bike_name']}" + (f" x{i['quantity']}" if i.get('quantity', 1) > 1 else '')
             for i in order_info['items']
         ])
-        
+
         # Parse shipping address
         addr = order_info['shipping_address']
         if isinstance(addr, str):
@@ -237,8 +487,52 @@ def _handle_payment_succeeded(pi):
             f"📦 {items_text}\n"
             f"📧 {order_info['customer_email']}"
         )
-        
+
         _send_sms(sms_message)
+
+
+def _refund_race_loser(pi_id: str, ref: dict, secret_key: str):
+    """Tertiary safety net. Refund a buyer whose payment succeeded but whose
+    session lost the reservation race. `ref` is a dict with keys:
+    {order_number, customer_email, customer_name, total} — pulled from the
+    session (since no real order was materialized in the race-lost path)."""
+    refund_ok = False
+    refund_id = None
+    refund_err = None
+
+    try:
+        import stripe
+        stripe.api_key = secret_key
+        refund = stripe.Refund.create(
+            payment_intent=pi_id,
+            reason='duplicate',
+            metadata={'order_number': ref['order_number']},
+            idempotency_key=f'race-refund-{pi_id}',
+        )
+        refund_id = refund.id
+        refund_ok = True
+        logger.info(f"Auto-refund issued: refund={refund_id} for race-lost session {ref['order_number']}")
+    except Exception as e:
+        refund_err = str(e)
+        logger.error(f"Refund failed for race-lost session {ref['order_number']}: {e}")
+
+    # Alert admin — they need to know whenever this happens
+    if refund_ok:
+        sms = (
+            f"⚠️ RACE AUTO-REFUND: {ref['order_number']}\n"
+            f"Bike was sold to another buyer in the same window.\n"
+            f"💸 Refund: ${float(ref['total']):.2f} → {ref['customer_email']}\n"
+            f"Stripe refund: {refund_id}"
+        )
+    else:
+        sms = (
+            f"🚨 CRITICAL: REFUND FAILED for {ref['order_number']}\n"
+            f"Bike sold to another buyer + auto-refund failed.\n"
+            f"💸 Manually refund ${float(ref['total']):.2f} via Stripe dashboard.\n"
+            f"PI: {pi_id}\n"
+            f"Error: {refund_err}"
+        )
+    _send_sms(sms)
 
 
 def _handle_payment_failed(pi):
@@ -250,27 +544,76 @@ def _handle_payment_failed(pi):
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, order_number FROM orders WHERE stripe_payment_intent_id = %s",
+                "SELECT id, order_number FROM checkout_sessions WHERE stripe_payment_intent_id = %s",
                 (pi_id,)
             )
-            order = cur.fetchone()
-            if not order:
-                logger.warning(f"payment_intent.payment_failed: no order for PI {pi_id}")
+            session = cur.fetchone()
+            if not session:
+                logger.warning(f"payment_intent.payment_failed: no session for PI {pi_id}")
                 return
 
-            cur.execute(
-                "UPDATE orders SET payment_status = 'unpaid', status = 'pending' WHERE id = %s",
-                (order['id'],)
-            )
+            session_id = session['id']
+
+            # Release the reservation immediately — buyer's card declined.
             cur.execute(
                 """
-                INSERT INTO order_events (order_id, event_type, message, metadata)
-                VALUES (%s, 'payment_intent.payment_failed', %s, %s)
+                UPDATE bikes
+                SET reservation_state = 'none',
+                    reserved_until = NULL,
+                    reservation_session_id = NULL
+                WHERE reservation_session_id = %s AND sold = 0
                 """,
-                (order['id'], failure, json.dumps({'payment_intent_id': pi_id}))
+                (session_id,)
+            )
+            cur.execute(
+                "UPDATE checkout_sessions SET status = 'abandoned' WHERE id = %s AND status = 'active'",
+                (session_id,)
+            )
+
+        conn.commit()
+        logger.info(f"Session {session['order_number']} payment failed: {failure} — reservation released")
+
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _handle_payment_canceled(pi):
+    """payment_intent.canceled — buyer abandoned, or we explicitly canceled
+    from the processing handler. Either way, release the reservation."""
+    pi_id = pi['id']
+    conn  = get_connection()
+    conn.commit()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, order_number FROM checkout_sessions WHERE stripe_payment_intent_id = %s",
+                (pi_id,)
+            )
+            session = cur.fetchone()
+            if not session:
+                logger.info(f"payment_intent.canceled: no session for PI {pi_id} (likely test event)")
+                return
+
+            session_id = session['id']
+
+            cur.execute(
+                """
+                UPDATE bikes
+                SET reservation_state = 'none',
+                    reserved_until = NULL,
+                    reservation_session_id = NULL
+                WHERE reservation_session_id = %s AND sold = 0
+                """,
+                (session_id,)
+            )
+            cur.execute(
+                "UPDATE checkout_sessions SET status = 'abandoned' WHERE id = %s AND status = 'active'",
+                (session_id,)
             )
         conn.commit()
-        logger.info(f"Order {order['order_number']} payment failed: {failure}")
+        logger.info(f"Session {session['order_number']} canceled — reservation released")
 
     except Exception:
         conn.rollback()

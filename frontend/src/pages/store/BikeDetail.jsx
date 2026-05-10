@@ -11,6 +11,7 @@ import { FRAME_SIZES, getSize } from '../../constants/sizes'
 import { getCondition } from '../../constants/conditions'
 import { bikePath } from '../../utils/bikePath'
 import { safeJsonLd } from '../../utils/safeJsonLd'
+import { categorySlug } from '../../utils/categorySlug'
 
 // Fullscreen image viewer - hover magnify on desktop, pinch+pan on mobile
 function ImageLightbox({ images, activeIndex, onClose, onPrev, onNext, setActiveIndex, slideDir }) {
@@ -528,7 +529,7 @@ export default function BikeDetail() {
                 "@type": "ListItem",
                 "position": 3,
                 "name": bike.category_name,
-                "item": `https://machxcycles.com/shop?category=${bike.category_id}`
+                "item": `https://machxcycles.com/shop/${categorySlug(bike.category_name)}`
               }] : []),
               {
                 "@type": "ListItem",
