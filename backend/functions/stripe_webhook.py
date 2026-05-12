@@ -126,13 +126,21 @@ def handler(event, context):
     pi         = evt['data']['object']
     logger.info(f"Stripe event: {event_type} | id: {event_id} | PI: {pi.get('id')}")
 
-    # Idempotency: if we've already processed this event id, return 200 without
-    # re-running side-effects. Stripe retries on any non-2xx and replays signed
-    # events within tolerance; without this check, retries double-fulfill.
-    if not _claim_event(event_id, event_type):
+    # Idempotency: skip if already FULLY processed.
+    # Critical ordering: we check processed_stripe_events at the top, but only
+    # CLAIM (insert) the event AFTER the handler completes successfully. If the
+    # Lambda times out mid-processing, the event isn't claimed and Stripe's
+    # retry can re-process it. Was claim-then-process — caused real lost orders
+    # when handlers ran near the 30s Lambda timeout.
+    if _is_event_processed(event_id):
         logger.info(f"Event {event_id} already processed — skipping")
         return success({'received': True, 'duplicate': True})
 
+    # Run the handler. Materialization itself is idempotent — checks
+    # checkout_sessions.status == 'converted' and orders.order_number unique
+    # before inserting — so even if two concurrent retries somehow race past
+    # the _is_event_processed check, the worst case is a wasted Lambda
+    # invocation, not a double-fulfilled order.
     if event_type == 'payment_intent.processing':
         _handle_payment_processing(pi, secret_key)
     elif event_type == 'payment_intent.succeeded':
@@ -144,13 +152,34 @@ def handler(event, context):
     else:
         logger.info(f"Unhandled event type (ignored): {event_type}")
 
+    # Mark event as processed only after the handler returned without error.
+    _mark_event_processed(event_id, event_type)
+
     return success({'received': True})
 
 
-def _claim_event(event_id: str, event_type: str) -> bool:
-    """Atomically claim an event for processing. Returns True if this is the
-    first time we've seen it, False if it's a duplicate. INSERT IGNORE relies
-    on processed_stripe_events.event_id being PRIMARY KEY."""
+def _is_event_processed(event_id: str) -> bool:
+    """True if this event_id has already been fully processed (i.e. previously
+    completed _mark_event_processed)."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM processed_stripe_events WHERE event_id = %s LIMIT 1",
+                (event_id,)
+            )
+            return cur.fetchone() is not None
+    except Exception as e:
+        logger.error(f"Failed to check event {event_id}: {e}")
+        # On error, fail-open (process the event) — better to risk a duplicate
+        # than to silently drop a real payment. Materialization is idempotent
+        # via UNIQUE on order_number.
+        return False
+
+
+def _mark_event_processed(event_id: str, event_type: str) -> None:
+    """Record successful processing so retries skip. Called only after handler
+    completes without raising."""
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -158,15 +187,12 @@ def _claim_event(event_id: str, event_type: str) -> bool:
                 "INSERT IGNORE INTO processed_stripe_events (event_id, event_type) VALUES (%s, %s)",
                 (event_id, event_type)
             )
-            inserted = cur.rowcount == 1
         conn.commit()
-        return inserted
     except Exception as e:
-        logger.error(f"Failed to claim event {event_id}: {e}")
-        # On error, fail-open (process the event) — better to risk a duplicate
-        # than to silently drop a real payment. The DB constraint still prevents
-        # actual double-inserts in the side-effect tables.
-        return True
+        logger.error(f"Failed to mark event {event_id} processed: {e}")
+        # Non-fatal. The handler already ran successfully; we just lose the
+        # idempotency guarantee for retries. Materialization itself stays safe
+        # via order_number UNIQUE.
 
 
 # ── Event handlers ────────────────────────────────────────────────────────────

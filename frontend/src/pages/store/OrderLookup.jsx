@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { Helmet } from 'react-helmet-async'
 import { lookupOrder } from '../../api/public'
+import { safeJsonLd } from '../../utils/safeJsonLd'
 import { Search, Package } from 'lucide-react'
 import Navbar from '../../components/store/Navbar'
 
@@ -25,7 +27,16 @@ export default function OrderLookup() {
     setLoading(true); setError(''); setOrder(null)
     try {
       const data = await lookupOrder(email, orderNum)
-      setOrder(data)
+      // Backend returns { order: {...}, items: [...], events?: [...], pending_materialization? }
+      // Flatten so the existing JSX (which reads order.X) works whether the data
+      // came from the orders table or the in-flight checkout_sessions fallback.
+      const flat = {
+        ...(data.order || {}),
+        items:  data.items || [],
+        events: data.events || [],
+        pending_materialization: data.pending_materialization || false,
+      }
+      setOrder(flat)
     } catch (err) {
       setError(err.message === 'Request failed: 404' ? 'Order not found. Check your email and order number.' : 'Something went wrong. Please try again.')
     } finally {
@@ -35,6 +46,29 @@ export default function OrderLookup() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <Helmet>
+        <title>Track Your Order | MachX Cycles</title>
+        <meta name="description" content="Look up your MachX Cycles order status with your email and order number." />
+        <link rel="canonical" href="https://machxcycles.com/track-order" />
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="Track Your Order | MachX Cycles" />
+        <meta property="og:description" content="Look up your order status." />
+        <meta property="og:url" content="https://machxcycles.com/track-order" />
+        <meta property="og:image" content="https://machxcycles.com/MachXPic.jpg" />
+        <meta name="twitter:title" content="Track Your Order | MachX Cycles" />
+        <meta name="twitter:description" content="Look up your order status." />
+        <meta name="twitter:image" content="https://machxcycles.com/MachXPic.jpg" />
+        <script type="application/ld+json">
+          {safeJsonLd({
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+              { "@type": "ListItem", "position": 1, "name": "Home",        "item": "https://machxcycles.com/" },
+              { "@type": "ListItem", "position": 2, "name": "Track Order", "item": "https://machxcycles.com/track-order" }
+            ]
+          })}
+        </script>
+      </Helmet>
       <Navbar />
       <div className="max-w-lg mx-auto px-4 py-12">
         <div className="text-center mb-8">
@@ -66,7 +100,7 @@ export default function OrderLookup() {
               value={orderNum}
               onChange={e => setOrderNum(e.target.value.toUpperCase())}
               className="w-full border border-gray-300 rounded-lg px-3 py-3 focus:outline-none focus:ring-2 focus:ring-pink-500 font-mono"
-              placeholder="MX-20260222-A1B2"
+              placeholder="MX-XXXXXXXX"
             />
           </div>
           <button

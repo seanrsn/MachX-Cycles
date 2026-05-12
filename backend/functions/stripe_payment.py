@@ -147,14 +147,21 @@ def handle_checkout(event):
     try:
         stripe = _get_stripe()
 
+        # receipt_email tells Stripe to email the customer a receipt
+        # automatically when the charge succeeds. Includes the amount, last 4,
+        # and our business info — works without any custom email infra.
+        # Also makes the customer email visible in the Stripe Dashboard
+        # payments list (was previously empty since we only put it in metadata).
+        customer_email = (body.get('customer_email') or '').strip()
         pi = stripe.PaymentIntent.create(
             amount=int(float(total) * 100),  # cents
             currency='usd',
             automatic_payment_methods={'enabled': True},
+            receipt_email=customer_email or None,
             metadata={
                 'session_id':     str(session_id),
                 'order_number':   order_number,
-                'customer_email': body.get('customer_email', ''),
+                'customer_email': customer_email,
             },
             description=f'MachX Cycles – {order_number}',
         )

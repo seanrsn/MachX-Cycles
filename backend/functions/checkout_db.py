@@ -18,6 +18,7 @@ doesn't know about Stripe — only sessions, orders, and reservations.
 """
 import json
 import logging
+import secrets
 import uuid
 import datetime
 
@@ -235,9 +236,13 @@ def create_session(body):
             total        = round(subtotal - discount_amount + shipping_fee, 2)
 
             # 5. Generate identifiers
+            #    Order number = MX- + 8 chars from a confusion-resistant alphabet.
+            #    Skips 0/O/1/I/L so customers reading it aloud over the phone
+            #    can't garble it. ~2 trillion combos at 8 chars — collisions are
+            #    astronomically unlikely; we don't need a uniqueness re-roll.
             session_token = uuid.uuid4().hex
-            date_str      = datetime.datetime.utcnow().strftime('%Y%m%d')
-            order_number  = f"MX-{date_str}-{uuid.uuid4().hex[:10].upper()}"
+            _ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'  # 31 chars (no 0/O/1/I/L)
+            order_number  = 'MX-' + ''.join(secrets.choice(_ALPHA) for _ in range(8))
             expires_at    = datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
 
             # 6. Insert session

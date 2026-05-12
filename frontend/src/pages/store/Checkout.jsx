@@ -201,7 +201,7 @@ function DetailsStep({ form, onChange, onNext, onBack }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">ZIP Code *</label>
-              <input value={form.zip} onChange={e => onChange('zip', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-3 focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="10001" />
+              <input value={form.zip} onChange={e => onChange('zip', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-3 focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="ZIP code" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
