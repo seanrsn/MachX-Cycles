@@ -16,11 +16,16 @@ BACKEND_DIR="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$DIST_DIR"
 
 # Map: Lambda function name -> source file in backend/functions/
+# /checkout and /orders API routes hit stripe-payment (outside VPC for Stripe
+# API access), which fans out to checkout-db (in VPC for RDS access).
 declare -A FUNCTIONS=(
   ["admin-api"]="admin_api.py"
   ["bikes-public"]="bikes_public.py"
-  ["checkout"]="checkout.py"
+  ["stripe-payment"]="stripe_payment.py"
+  ["checkout-db"]="checkout_db.py"
   ["stripe-webhook"]="stripe_webhook.py"
+  ["machx-contact-api"]="contact_api.py"
+  ["machx-bike-html-regen"]="bike_html_regen.py"  # non-VPC: regenerates per-bike HTML on admin actions via S3 trigger
 )
 
 deploy_lambda() {
