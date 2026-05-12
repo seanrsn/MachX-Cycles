@@ -2,37 +2,22 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    
-    <!-- SEO defaults (overridden per-page by react-helmet-async) -->
-    <title>MachX Cycles | Premium Pre-Owned Performance Bikes</title>
-    <meta name="description" content="Shop certified pre-owned road, mountain, and e-bikes at unbeatable prices. Every bike inspected and ready to ride. Premium performance without the premium price tag." />
-    <meta name="keywords" content="pre-owned bikes, used bikes, certified bikes, road bikes, mountain bikes, e-bikes, MachX Cycles, affordable bikes" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="author" content="MachX Cycles" />
-    
-    <!-- Open Graph / Social -->
-    <meta property="og:type" content="website" />
+
+    <!-- Always-static brand tags. Per-page title, description, canonical, OG,
+         and Twitter tags are all set by react-helmet-async on each route — DO
+         NOT add fallbacks for those here, or they'll appear twice in the
+         prerendered HTML and OG scrapers will read the generic site default
+         first instead of the per-page version. -->
+    <title>MachX Cycles</title>
     <meta property="og:site_name" content="MachX Cycles" />
-    <meta property="og:title" content="MachX Cycles | Premium Pre-Owned Bikes" />
-    <meta property="og:description" content="Certified pre-owned road, mountain, and e-bikes. Inspected, tuned, and priced to ride." />
-    <meta property="og:url" content="https://machxcycles.com" />
-    
-    <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="MachX Cycles | Premium Pre-Owned Bikes" />
-    <meta name="twitter:description" content="Certified pre-owned bikes. Premium performance without the premium price tag." />
-    
-    <!-- Canonical -->
-    <link rel="canonical" href="https://machxcycles.com" />
-    
-    <!-- Favicon (just the X bike icon) -->
+
+    <!-- Favicon -->
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/favicon.png" />
-    
-    <!-- OG Image (full logo for link previews) -->
-    <meta property="og:image" content="https://machxcycles.com/og-image.png" />
-    <meta name="twitter:image" content="https://machxcycles.com/og-image.png" />
-    
+
     <!-- Theme color (matches navbar bg-gray-950) -->
     <meta name="theme-color" content="#030712" />
   </head>

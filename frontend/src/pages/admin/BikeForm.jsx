@@ -1,18 +1,21 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, Save, Upload, X, Film, ImageIcon, CheckCircle, Bike, GripVertical } from 'lucide-react'
+import { Plus, Trash2, Save, Upload, X, Film, ImageIcon, CheckCircle, Bike, GripVertical, AlertTriangle, Clock } from 'lucide-react'
 import {
-  getBike, createBike, updateBike,
+  getBike, createBike, updateBike, releaseBikeReservation,
   getUploadUrl, deleteImage, reorderImages,
 } from '../../api/admin'
 import { PageHeader, Button, Spinner } from '../../components/common'
+import { FRAME_SIZES } from '../../constants/sizes'
+import { CONDITIONS } from '../../constants/conditions'
+import { CYCLING_BRANDS, BRAND_OTHER } from '../../constants/brands'
 
 const CATEGORIES = [
   { id: 1, name: 'Road' }, { id: 2, name: 'Mountain' }, { id: 3, name: 'Hybrid' },
   { id: 4, name: 'Cruiser' }, { id: 5, name: 'Gravel' }, { id: 6, name: 'E-Bike' },
 ]
-const MATERIALS = ['Carbon Fiber', 'Aluminum', 'Steel', 'Titanium']
+const MATERIALS = ['Carbon', 'Aluminum', 'Steel', 'Titanium']
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/quicktime', 'video/mov']
 const ACCEPT_ATTR    = '.jpg,.jpeg,.png,.webp,.gif,.mp4,.mov,image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime'
 const IMAGE_MAX        = 25 * 1024 * 1024   // 25 MB hard cap (post-compression)
@@ -146,11 +149,17 @@ function ImageManager({ bikeId, initialImages = [] }) {
           content_type: file.type,
         })
 
-        // 2. PUT directly to S3
+        // 2. PUT directly to S3.
+        // Cache-Control matches the value the backend baked into the presigned
+        // URL signature — must be sent verbatim or S3 rejects with signature
+        // mismatch. Filenames are UUIDs so 1y immutable is safe.
         setUploads(prev => prev.map(u => u.id === item.id ? { ...u, progress: 30 } : u))
         const putRes = await fetch(upload_url, {
           method:  'PUT',
-          headers: { 'Content-Type': file.type },
+          headers: {
+            'Content-Type':  file.type,
+            'Cache-Control': 'public, max-age=31536000, immutable',
+          },
           body:    file,
         })
         if (!putRes.ok) throw new Error('S3 upload failed')
@@ -299,6 +308,113 @@ function ImageManager({ bikeId, initialImages = [] }) {
   )
 }
 
+// ── ReservationPanel ─────────────────────────────────────────────────────────
+// Only mounted when a bike has an active reservation. Shows what state the
+// reservation is in, who has it (order id), when it expires, and gives admin
+// a manual "release" button for stuck cases.
+
+function describeReservation(state) {
+  switch (state) {
+    case 'soft':       return { label: 'Cart hold (5 min TTL)',    severity: 'low'  }
+    case 'pi_created': return { label: 'On Stripe form (10 min TTL)', severity: 'med' }
+    case 'processing': return { label: 'Authorizing payment (locked)', severity: 'high' }
+    default:           return { label: state, severity: 'low' }
+  }
+}
+
+function formatExpiry(reservedUntil) {
+  if (!reservedUntil) return null
+  // MySQL returns ISO-ish format (UTC). Treat as UTC; show in local time.
+  const d = new Date(reservedUntil + (reservedUntil.endsWith('Z') ? '' : 'Z'))
+  const minsLeft = Math.round((d.getTime() - Date.now()) / 60000)
+  if (minsLeft <= 0) return 'expired (will release automatically on next checkout attempt)'
+  if (minsLeft === 1) return '~1 min remaining'
+  return `~${minsLeft} min remaining`
+}
+
+function ReservationPanel({ bike, onReleased }) {
+  const [confirming, setConfirming] = useState(false)
+  const [releasing, setReleasing]   = useState(false)
+  const [err, setErr]               = useState('')
+
+  const meta     = describeReservation(bike.reservation_state)
+  const expiry   = formatExpiry(bike.reserved_until)
+  const isLocked = bike.reservation_state === 'processing'
+
+  async function handleRelease() {
+    setErr('')
+    setReleasing(true)
+    try {
+      await releaseBikeReservation(bike.id)
+      setConfirming(false)
+      onReleased?.()
+    } catch (e) {
+      setErr(e?.message || 'Failed to release reservation')
+    } finally {
+      setReleasing(false)
+    }
+  }
+
+  return (
+    <div className={`rounded-xl border p-4 ${isLocked ? 'bg-amber-50 border-amber-300' : 'bg-blue-50 border-blue-200'}`}>
+      <div className="flex items-start gap-3">
+        <div className={`p-2 rounded-lg ${isLocked ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+          {isLocked ? <AlertTriangle size={18} /> : <Clock size={18} />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <h2 className={`font-semibold ${isLocked ? 'text-amber-900' : 'text-blue-900'}`}>
+            Active reservation — {meta.label}
+          </h2>
+          <p className={`text-sm mt-0.5 ${isLocked ? 'text-amber-800' : 'text-blue-800'}`}>
+            {bike.reservation_session_id
+              ? <>A shopper (session <span className="font-mono">#{bike.reservation_session_id}</span>) is currently checking out this bike.</>
+              : 'Reservation is held by an unknown session.'}
+            {expiry && <> · {expiry}</>}
+          </p>
+          {isLocked && (
+            <p className="text-xs text-amber-800 mt-1.5">
+              <strong>Heads up:</strong> the buyer's payment is being authorized right now. Releasing this reservation
+              won't refund their payment if it succeeds — only use this if you're certain the checkout is stuck.
+            </p>
+          )}
+
+          {!confirming ? (
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              className="mt-3 text-xs font-medium text-gray-700 underline hover:text-gray-900"
+            >
+              Release reservation
+            </button>
+          ) : (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-gray-700">Are you sure?</span>
+              <button
+                type="button"
+                onClick={handleRelease}
+                disabled={releasing}
+                className="text-xs font-semibold bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700 disabled:opacity-60"
+              >
+                {releasing ? 'Releasing…' : 'Yes, release'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setConfirming(false); setErr('') }}
+                disabled={releasing}
+                className="text-xs font-medium text-gray-600 hover:text-gray-900"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+          {err && <p className="text-xs text-red-700 mt-2">{err}</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 // ── BikeForm ──────────────────────────────────────────────────────────────────
 
 export default function BikeForm() {
@@ -309,9 +425,14 @@ export default function BikeForm() {
 
   const [form, setForm] = useState({
     name: '', category_id: 1, description: '', base_price: '', msrp: '',
-    material: '', model_year: new Date().getFullYear(),
+    brand: '', material: '', frame_size: '', condition_grade: '',
+    model_year: new Date().getFullYear(),
     featured: false, sold: false,
   })
+  // Track whether the admin picked "Other" so we can show a free-text field.
+  // If the brand on a loaded bike isn't in the catalog, we also flip into
+  // free-text mode so the value remains editable.
+  const [brandIsOther, setBrandIsOther] = useState(false)
   const [saving, setSaving]     = useState(false)
   const [success, setSuccess]   = useState(false)
   const [error, setError]       = useState('')
@@ -326,17 +447,29 @@ export default function BikeForm() {
   // Depend on bikeData?.id (primitive) — avoids object reference staleness from cache
   useEffect(() => {
     if (!bikeData) return
+    // 'MachX' was the legacy default brand from the original schema before we
+    // added a real brand field. Treat it as unset so the admin picks a real
+    // bike brand on edit.
+    const loadedBrand = (bikeData.brand && bikeData.brand !== 'MachX') ? bikeData.brand : ''
     setForm({
-      name:        bikeData.name        || '',
-      category_id: bikeData.category_id || 1,
-      description: bikeData.description || '',
-      base_price:  bikeData.base_price  || '',
-      msrp:        bikeData.msrp        || '',
-      material:    bikeData.material    || '',
-      model_year:  bikeData.model_year  || new Date().getFullYear(),
-      featured:    !!bikeData.featured,
-      sold:        !!bikeData.sold,
+      name:            bikeData.name            || '',
+      category_id:     bikeData.category_id     || 1,
+      description:     bikeData.description     || '',
+      base_price:      bikeData.base_price      || '',
+      msrp:            bikeData.msrp            || '',
+      brand:           loadedBrand,
+      material:        bikeData.material        || '',
+      frame_size:      bikeData.frame_size      || '',
+      condition_grade: bikeData.condition_grade || '',
+      model_year:      bikeData.model_year      || new Date().getFullYear(),
+      featured:        !!bikeData.featured,
+      sold:            !!bikeData.sold,
     })
+    // If the loaded brand isn't in the catalog, the admin needs the free-text
+    // box to edit it (otherwise it'd be invisible in the dropdown).
+    if (loadedBrand && !CYCLING_BRANDS.includes(loadedBrand)) {
+      setBrandIsOther(true)
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bikeData?.id])
 
@@ -348,13 +481,16 @@ export default function BikeForm() {
     try {
       const payload = {
         ...form,
-        base_price:  parseFloat(form.base_price),
-        msrp:        form.msrp ? parseFloat(form.msrp) : null,
-        category_id: parseInt(form.category_id),
-        model_year:  parseInt(form.model_year),
-        featured:    form.featured ? 1 : 0,
-        is_active:   1,
-        sold:        form.sold ? 1 : 0,
+        base_price:      parseFloat(form.base_price),
+        msrp:            form.msrp ? parseFloat(form.msrp) : null,
+        category_id:     parseInt(form.category_id),
+        model_year:      parseInt(form.model_year),
+        brand:           (form.brand || '').trim() || null,
+        frame_size:      form.frame_size || null,
+        condition_grade: form.condition_grade || null,
+        featured:        form.featured ? 1 : 0,
+        is_active:       1,
+        sold:            form.sold ? 1 : 0,
       }
       let bikeId = id
       if (isEdit) {
@@ -437,6 +573,29 @@ export default function BikeForm() {
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
 
+      {/* Active reservation banner — only renders when a buyer is *actively*
+          checking out this bike. Hides when:
+            - reservation_state is none/sold
+            - bike is sold
+            - reservation TTL has expired (state stale, no longer blocks anyone) */}
+      {(() => {
+        if (!isEdit || !bikeData || bikeData.sold) return null
+        const state = bikeData.reservation_state
+        if (!state || state === 'none' || state === 'sold') return null
+        // Soft / pi_created with expired TTL: panel would just say "expired".
+        // The reservation isn't actually blocking anyone. Hide it.
+        if (state !== 'processing' && bikeData.reserved_until) {
+          const exp = new Date(bikeData.reserved_until + (bikeData.reserved_until.endsWith('Z') ? '' : 'Z'))
+          if (exp.getTime() <= Date.now()) return null
+        }
+        return (
+          <ReservationPanel bike={bikeData} onReleased={() => {
+            qc.invalidateQueries({ queryKey: ['admin-bike', id] })
+            qc.invalidateQueries({ queryKey: ['admin-bikes'] })
+          }} />
+        )
+      })()}
+
       {/* Mark as Sold toggle */}
       <div className={`rounded-xl border p-4 flex items-center justify-between ${form.sold ? 'bg-red-50 border-red-300' : 'bg-green-50 border-green-300'}`}>
         <div>
@@ -503,10 +662,58 @@ export default function BikeForm() {
             <p className="text-xs text-gray-400 mt-1">Shown crossed out to highlight savings</p>
           </div>
           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
+            <select
+              value={brandIsOther ? BRAND_OTHER : form.brand}
+              onChange={e => {
+                const v = e.target.value
+                if (v === BRAND_OTHER) {
+                  setBrandIsOther(true)
+                  setField('brand', '')
+                } else {
+                  setBrandIsOther(false)
+                  setField('brand', v)
+                }
+              }}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-pink-500"
+            >
+              <option value="">Select brand…</option>
+              {CYCLING_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+              <option value={BRAND_OTHER}>Other (type below)</option>
+            </select>
+            {brandIsOther && (
+              <input
+                type="text"
+                value={form.brand}
+                onChange={e => setField('brand', e.target.value)}
+                className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-pink-500"
+                placeholder="Enter brand name (e.g. Argonaut, Mosaic, Sage)"
+              />
+            )}
+          </div>
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Material</label>
             <select value={form.material} onChange={e => setField('material', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-pink-500">
               <option value="">Select frame material…</option>
               {MATERIALS.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Frame Size</label>
+            <select value={form.frame_size} onChange={e => setField('frame_size', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-pink-500">
+              <option value="">Select frame size…</option>
+              {FRAME_SIZES.map(s => (
+                <option key={s.code} value={s.code}>{s.label} — {s.frame}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Condition</label>
+            <select value={form.condition_grade} onChange={e => setField('condition_grade', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-pink-500">
+              <option value="">Select condition…</option>
+              {CONDITIONS.map(c => (
+                <option key={c.code} value={c.code}>{c.label} — {c.headline}</option>
+              ))}
             </select>
           </div>
           <div>

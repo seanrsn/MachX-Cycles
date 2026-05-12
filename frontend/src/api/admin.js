@@ -13,6 +13,7 @@ export const getBike   = (id)          => api.get(`/admin/bikes/${id}`)
 export const createBike = (body)       => api.post('/admin/bikes', body)
 export const updateBike = (id, body)   => api.put(`/admin/bikes/${id}`, body)
 export const deleteBike = (id)         => api.delete(`/admin/bikes/${id}`)
+export const releaseBikeReservation = (id) => api.post(`/admin/bikes/${id}/release-reservation`, {})
 
 // ── Images ────────────────────────────────────────────────────────────────────
 export const getUploadUrl   = (bikeId, body)      => api.post(`/admin/bikes/${bikeId}/images`, body)

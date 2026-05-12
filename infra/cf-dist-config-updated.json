@@ -100,9 +100,9 @@
                                                },
                                                {
                                                    "ErrorCode":  404,
-                                                   "ResponsePagePath":  "/index.html",
-                                                   "ResponseCode":  "200",
-                                                   "ErrorCachingMinTTL":  10
+                                                   "ResponsePagePath":  "/404/index.html",
+                                                   "ResponseCode":  "404",
+                                                   "ErrorCachingMinTTL":  60
                                                }
                                            ]
                              },

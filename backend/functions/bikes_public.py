@@ -55,7 +55,9 @@ def fuzzy_match_bikes(search_query, conn):
 
     return matched_ids
 
-_RE_BIKE = re.compile(r'^/bikes/(\d+)$')
+# Match anything after /bikes/. get_bike does the slug lookup — pure-numeric
+# inputs and id-prefixed slugs get 404'd because slugs are never bare numbers.
+_RE_BIKE = re.compile(r'^/bikes/([A-Za-z0-9_\-]+)$')
 
 
 def handler(event, context):
@@ -77,10 +79,14 @@ def handler(event, context):
     if path == '/shipping-rates':
         return get_shipping_rates()
 
-    # GET /bikes/{id}
+    # GET /sitemap.xml
+    if path == '/sitemap.xml':
+        return get_sitemap()
+
+    # GET /bikes/{slug} (or legacy /bikes/{id} or /bikes/{id}-{slug})
     m = _RE_BIKE.match(path)
     if m:
-        return get_bike(int(m.group(1)))
+        return get_bike(m.group(1))
 
     # GET /bikes
     if path == '/bikes':
@@ -88,6 +94,66 @@ def handler(event, context):
         return get_bikes(params)
 
     return error('Not found', status=404)
+
+
+def get_sitemap():
+    """Dynamic sitemap.xml — always reflects live inventory. Sold/inactive
+    bikes are excluded automatically so we don't waste crawl budget."""
+    BASE = 'https://machxcycles.com'
+
+    static_urls = [
+        ('/',             '1.0', 'daily'),
+        ('/shop',         '0.9', 'daily'),
+        ('/about',        '0.5', 'monthly'),
+        ('/contact',      '0.5', 'monthly'),
+        ('/support',      '0.5', 'monthly'),
+        ('/track-order',  '0.3', 'monthly'),
+    ]
+
+    conn = get_connection()
+    conn.commit()
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, slug, updated_at FROM bikes "
+            "WHERE is_active = 1 AND sold = 0 "
+            "ORDER BY updated_at DESC"
+        )
+        bikes = cur.fetchall()
+        cur.execute(
+            "SELECT id, slug FROM categories ORDER BY sort_order ASC"
+        )
+        categories = cur.fetchall()
+
+    parts = ['<?xml version="1.0" encoding="UTF-8"?>',
+             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+
+    for path, priority, freq in static_urls:
+        parts.append(f'<url><loc>{BASE}{path}</loc><changefreq>{freq}</changefreq><priority>{priority}</priority></url>')
+
+    for cat in categories:
+        parts.append(f'<url><loc>{BASE}/shop?category={cat["id"]}</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>')
+
+    for b in bikes:
+        slug = (b.get('slug') or '').strip()
+        if not slug:
+            continue  # bikes without slugs aren't indexable in slug-only mode
+        url = f'{BASE}/bikes/{slug}'
+        lastmod = b['updated_at'].strftime('%Y-%m-%d') if b.get('updated_at') else ''
+        lastmod_tag = f'<lastmod>{lastmod}</lastmod>' if lastmod else ''
+        parts.append(f'<url><loc>{url}</loc>{lastmod_tag}<changefreq>weekly</changefreq><priority>0.8</priority></url>')
+
+    parts.append('</urlset>')
+    body = '\n'.join(parts)
+
+    return {
+        'statusCode': 200,
+        'headers': {
+            'Content-Type': 'application/xml; charset=utf-8',
+            'Cache-Control': 'public, max-age=3600',
+            'Access-Control-Allow-Origin': '*',
+        },
+        'body': body,
+    }
 
 
 def get_categories():
@@ -112,8 +178,17 @@ def get_shipping_rates():
 
 
 def get_sizes():
-    # No longer applicable — bikes are 1-of-1, no size variants
-    return success({'sizes': []})
+    # Canonical size catalog. Mirrors frontend/src/constants/sizes.js — keep in sync.
+    sizes = [
+        {'code': 'XS',   'label': 'XS',       'frame': '48cm', 'min_height': "4'11\"", 'max_height': "5'2\""},
+        {'code': 'S',    'label': 'Small',    'frame': '50cm', 'min_height': "5'2\"",  'max_height': "5'5\""},
+        {'code': 'S/M',  'label': 'Small/M',  'frame': '52cm', 'min_height': "5'5\"",  'max_height': "5'7\""},
+        {'code': 'M',    'label': 'Medium',   'frame': '54cm', 'min_height': "5'7\"",  'max_height': "5'10\""},
+        {'code': 'L',    'label': 'Large',    'frame': '56cm', 'min_height': "5'10\"", 'max_height': "6'1\""},
+        {'code': 'L/XL', 'label': 'Large/XL', 'frame': '58cm', 'min_height': "6'1\"",  'max_height': "6'3\""},
+        {'code': 'XL',   'label': 'XL',       'frame': '60cm', 'min_height': "6'3\"",  'max_height': "6'5\""},
+    ]
+    return success({'sizes': sizes})
 
 
 def get_bikes(params):
@@ -149,6 +224,9 @@ def get_bikes(params):
         placeholders = ','.join(['%s'] * len(matched_ids))
         conditions.append(f'b.id IN ({placeholders})')
         args.extend(matched_ids)
+    if size:
+        conditions.append('b.frame_size = %s')
+        args.append(size)
     if min_price:
         try:
             conditions.append(f'({price_expr}) >= %s')
@@ -181,9 +259,9 @@ def get_bikes(params):
 
         # Bikes with first image
         cur.execute(f"""
-            SELECT b.id, b.name, b.description, b.base_price, b.msrp, b.material,
-                   b.weight, b.model_year, b.featured, b.is_active,
-                   b.category_id, b.sold,
+            SELECT b.id, b.slug, b.name, b.description, b.base_price, b.msrp, b.brand,
+                   b.material, b.frame_size, b.condition_grade, b.weight, b.model_year,
+                   b.featured, b.is_active, b.category_id, b.sold,
                    c.name AS category_name,
                    (SELECT bi.url FROM bike_images bi WHERE bi.bike_id = b.id
                     ORDER BY bi.sort_order ASC LIMIT 1) AS first_image_url
@@ -208,26 +286,28 @@ def get_bikes(params):
     })
 
 
-def get_bike(bike_id):
+def get_bike(slug):
+    """Look up a bike by its slug. Bare numeric IDs and id-prefixed forms
+    are not supported — slug is the canonical identifier."""
     conn = get_connection()
     conn.commit()
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT b.id, b.name, b.description, b.base_price, b.msrp, b.material,
-                   b.weight, b.model_year, b.featured, b.is_active,
-                   b.category_id, b.sold,
+            SELECT b.id, b.slug, b.name, b.description, b.base_price, b.msrp, b.brand,
+                   b.material, b.frame_size, b.condition_grade, b.weight, b.model_year,
+                   b.featured, b.is_active, b.category_id, b.sold,
                    c.name AS category_name
             FROM bikes b
             LEFT JOIN categories c ON c.id = b.category_id
-            WHERE b.id = %s AND b.is_active = 1
-        """, (bike_id,))
+            WHERE b.slug = %s AND b.is_active = 1
+        """, (slug,))
         bike = cur.fetchone()
         if not bike:
             return error('Bike not found', status=404)
 
         cur.execute(
             "SELECT id, url, sort_order FROM bike_images WHERE bike_id = %s ORDER BY sort_order ASC",
-            (bike_id,)
+            (bike['id'],)
         )
         bike['images'] = cur.fetchall()
 

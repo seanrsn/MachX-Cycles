@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/* Subtle entrance animation for spec cards (BikeDetail) and listing chips */
+@keyframes spec-card-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.spec-card-anim {
+  animation: spec-card-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .spec-card-anim { animation: none; }
+}
+
 /* MachX brand — pink primary, orange accent in gradients only */
 .mx-gradient-text {
   background-image: linear-gradient(110deg, #f472b6 0%, #ec4899 30%, #f97316 100%);

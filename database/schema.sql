@@ -26,53 +26,80 @@ CREATE TABLE `categories` (
 
 
 -- ============================================================
--- BIKES  (product-level info; stock is tracked on bike_variants)
+-- BIKES  (each row is a unique 1-of-1 pre-owned bike)
 -- ============================================================
 CREATE TABLE `bikes` (
-  `id`          int            NOT NULL AUTO_INCREMENT,
-  `category_id` int            NOT NULL,
-  `name`        varchar(255)   NOT NULL,           -- "MachX Aero Pro 2025"
-  `slug`        varchar(255)   NOT NULL,           -- URL-friendly name
-  `description` text,
-  `base_price`  decimal(10,2)  NOT NULL,           -- base MSRP; variants can override
-  `material`    varchar(50),                       -- "Carbon Fiber", "Aluminum", "Steel", "Titanium"
-  `weight`      varchar(50),                       -- "7.8 kg / 17.2 lbs"
-  `brand`       varchar(100)   DEFAULT 'MachX',
-  `model_year`  int,
-  `specs`       json,                              -- flexible: groupset, brakes, wheels, tires, etc.
-  `featured`    tinyint(1)     DEFAULT 0,          -- show on homepage
-  `is_active`   tinyint(1)     DEFAULT 1,          -- soft delete / hide
-  `created_at`  datetime       DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`  datetime       DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `id`              int            NOT NULL AUTO_INCREMENT,
+  `category_id`     int            NOT NULL,
+  `name`            varchar(255)   NOT NULL,           -- "2019 Cannondale SuperSix Evo"
+  `slug`            varchar(255)   NOT NULL,           -- URL-friendly slug
+  `description`     text,
+  `base_price`      decimal(10,2)  NOT NULL,           -- our asking price
+  `msrp`            decimal(10,2),                     -- original retail (shown crossed out)
+  `brand`           varchar(100),                      -- manufacturer: "Cannondale", "Trek", etc.
+  `material`        varchar(50),                       -- "Carbon", "Aluminum", "Steel", "Titanium"
+  `frame_size`      varchar(20),                       -- size code: "XS","S","S/M","M","L","L/XL","XL"
+  `condition_grade` varchar(20),                       -- "excellent","very_good","good","fair"
+  `weight`          varchar(50),                       -- "7.8 kg / 17.2 lbs"
+  `model_year`      int,
+  `specs`           json,                              -- flexible: groupset, brakes, wheels, tires, etc.
+  -- 1-of-1 inventory state
+  `sold`            tinyint(1)     NOT NULL DEFAULT 0, -- terminal: bike is sold
+  `reservation_state`      enum('none','soft','pi_created','processing','sold') NOT NULL DEFAULT 'none',
+  `reserved_until`         datetime DEFAULT NULL,       -- TTL for soft / pi_created
+  `reservation_session_id` int      DEFAULT NULL,       -- which checkout_session holds the lock
+  -- Catalog flags
+  `featured`        tinyint(1)     DEFAULT 0,          -- shown on homepage
+  `is_active`       tinyint(1)     DEFAULT 1,          -- soft delete / hide
+  `created_at`      datetime       DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`      datetime       DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_bikes_slug` (`slug`),
   KEY `fk_bikes_category_id` (`category_id`),
   KEY `idx_bikes_featured_active` (`featured`, `is_active`),
   KEY `idx_bikes_material` (`material`),
+  KEY `idx_bikes_frame_size` (`frame_size`),
+  KEY `idx_bikes_condition` (`condition_grade`),
   KEY `idx_bikes_price` (`base_price`),
+  KEY `idx_bikes_reservation` (`reservation_state`, `reserved_until`),
   CONSTRAINT `fk_bikes_category` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
 -- ============================================================
--- BIKE VARIANTS  (one row per purchasable SKU: size + color combo)
--- A "MachX Aero Pro" in 3 sizes × 2 colors = 6 rows.
--- A "1-of-1" custom bike = 1 row with stock_count = 1.
+-- CHECKOUT SESSIONS  (in-flight checkouts; before payment confirms)
+-- A session is materialized into a real `orders` row by stripe-webhook on
+-- payment_intent.succeeded. Abandoned/expired sessions never become orders.
 -- ============================================================
-CREATE TABLE `bike_variants` (
-  `id`             int           NOT NULL AUTO_INCREMENT,
-  `bike_id`        int           NOT NULL,
-  `sku`            varchar(50)   NOT NULL,           -- "MACHX-AERO-54-BLK"
-  `frame_size`     varchar(20)   NOT NULL,           -- "48", "50", "52", "54", "56", "58" or "S", "M", "L", "XL"
-  `color`          varchar(50)   NOT NULL,           -- "Matte Black", "Gloss Red"
-  `price_override` decimal(10,2) DEFAULT NULL,       -- NULL = use bike.base_price
-  `stock_count`    int           NOT NULL DEFAULT 0,
-  `is_active`      tinyint(1)    DEFAULT 1,
+CREATE TABLE `checkout_sessions` (
+  `id`                       int           NOT NULL AUTO_INCREMENT,
+  `session_token`            varchar(64)   NOT NULL,
+  `order_number`             varchar(30),                -- pre-generated; transfers to orders on materialization
+  `buyer_token`              varchar(64),                -- localStorage UUID for same-buyer recognition
+  `customer_email`           varchar(255)  NOT NULL,
+  `customer_name`            varchar(200)  NOT NULL,
+  `customer_phone`           varchar(20),
+  `shipping_address`         json          NOT NULL,
+  `shipping_rate_id`         int,
+  `shipping_fee`             decimal(10,2) DEFAULT 0.00,
+  `subtotal`                 decimal(10,2) NOT NULL,
+  `discount_amount`          decimal(10,2) DEFAULT 0.00,
+  `total`                    decimal(10,2) NOT NULL,
+  `promo_code`               varchar(50),
+  `items`                    json          NOT NULL,    -- [{bike_id, bike_name, quantity, unit_price}]
+  `stripe_payment_intent_id` varchar(255),
+  `status`                   enum('active','converted','abandoned','expired') DEFAULT 'active',
+  `converted_to_order_id`    int,
+  `expires_at`               datetime,
+  `created_at`               datetime DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`               datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_variants_sku` (`sku`),
-  KEY `fk_variants_bike_id` (`bike_id`),
-  KEY `idx_variants_stock` (`stock_count`),
-  CONSTRAINT `fk_variants_bike` FOREIGN KEY (`bike_id`) REFERENCES `bikes` (`id`) ON DELETE CASCADE
+  UNIQUE KEY `uk_session_token` (`session_token`),
+  UNIQUE KEY `uk_session_order_number` (`order_number`),
+  KEY `idx_session_buyer_token` (`buyer_token`),
+  KEY `idx_session_pi` (`stripe_payment_intent_id`),
+  KEY `idx_session_status` (`status`),
+  KEY `idx_session_expires` (`expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
@@ -95,9 +122,10 @@ CREATE TABLE `bike_images` (
 -- ============================================================
 -- ORDERS
 -- ============================================================
+-- Only contains real, paid orders. In-flight state lives in checkout_sessions.
 CREATE TABLE `orders` (
   `id`                      int           NOT NULL AUTO_INCREMENT,
-  `order_number`            varchar(20)   NOT NULL,    -- human-readable: "MX-20250219-0001"
+  `order_number`            varchar(30)   NOT NULL,    -- "MX-YYYYMMDD-XXXXXXXXXX" (10 hex)
   `customer_email`          varchar(255)  NOT NULL,
   `customer_name`           varchar(200)  NOT NULL,
   `customer_phone`          varchar(20),
@@ -144,18 +172,25 @@ CREATE TABLE `order_items` (
   `id`          int           NOT NULL AUTO_INCREMENT,
   `order_id`    int           NOT NULL,
   `bike_id`     int           NOT NULL,
-  `variant_id`  int           NOT NULL,
   `quantity`    int           DEFAULT 1,
   `unit_price`  decimal(10,2) NOT NULL,    -- snapshot of price at time of order
-  `frame_size`  varchar(20)   NOT NULL,    -- denormalized for easy display
-  `color`       varchar(50)   NOT NULL,    -- denormalized for easy display
   PRIMARY KEY (`id`),
   KEY `fk_order_items_order_id` (`order_id`),
   KEY `fk_order_items_bike_id` (`bike_id`),
-  KEY `fk_order_items_variant_id` (`variant_id`),
   CONSTRAINT `fk_order_items_order`   FOREIGN KEY (`order_id`)   REFERENCES `orders` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_order_items_bike`    FOREIGN KEY (`bike_id`)    REFERENCES `bikes` (`id`),
-  CONSTRAINT `fk_order_items_variant` FOREIGN KEY (`variant_id`) REFERENCES `bike_variants` (`id`)
+  CONSTRAINT `fk_order_items_bike`    FOREIGN KEY (`bike_id`)    REFERENCES `bikes` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+
+-- ============================================================
+-- PROCESSED STRIPE EVENTS  (webhook idempotency)
+-- ============================================================
+CREATE TABLE `processed_stripe_events` (
+  `event_id`     varchar(255) NOT NULL,
+  `event_type`   varchar(100),
+  `processed_at` datetime     DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`event_id`),
+  KEY `idx_processed_at` (`processed_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 

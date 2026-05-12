@@ -1,5 +1,6 @@
 import { Helmet } from 'react-helmet-async'
 import { Link } from 'react-router-dom'
+import { safeJsonLd } from '../../utils/safeJsonLd'
 import { Search, DollarSign, Users, CheckCircle, ArrowRight } from 'lucide-react'
 import Navbar from '../../components/store/Navbar'
 import Footer from '../../components/store/Footer'
@@ -31,9 +32,49 @@ export default function About() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Helmet>
-        <title>About Us | MachX Cycles</title>
-        <meta name="description" content="MachX Cycles - Brooklyn's premier pre-owned bike shop. Premium performance bikes at unbeatable prices. Learn about our inspection process and commitment to value." />
+        <title>About MachX Cycles — Brooklyn Pre-Owned Bike Shop</title>
+        <meta name="description" content="MachX Cycles is Brooklyn's premium pre-owned bike shop. Every bike we sell is hand-inspected, tuned, and ready to ride. Learn about our process and commitment." />
         <link rel="canonical" href="https://machxcycles.com/about" />
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="About MachX Cycles — Brooklyn Pre-Owned Bike Shop" />
+        <meta property="og:description" content="Brooklyn's premium pre-owned bike shop. Every bike inspected, tuned, and ride-ready." />
+        <meta property="og:url" content="https://machxcycles.com/about" />
+        <meta property="og:image" content="https://machxcycles.com/MachXPic.jpg" />
+        <meta name="twitter:title" content="About MachX Cycles — Brooklyn Pre-Owned Bike Shop" />
+        <meta name="twitter:description" content="Brooklyn's premium pre-owned bike shop." />
+        <meta name="twitter:image" content="https://machxcycles.com/MachXPic.jpg" />
+        <script type="application/ld+json">
+          {safeJsonLd({
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+              { "@type": "ListItem", "position": 1, "name": "Home",  "item": "https://machxcycles.com/" },
+              { "@type": "ListItem", "position": 2, "name": "About", "item": "https://machxcycles.com/about" }
+            ]
+          })}
+        </script>
+        <script type="application/ld+json">
+          {safeJsonLd({
+            "@context": "https://schema.org",
+            "@type": "Organization",
+            "name": "MachX Cycles",
+            "url": "https://machxcycles.com/",
+            "logo": "https://machxcycles.com/logo.png",
+            "parentOrganization": {
+              "@type": "BicycleStore",
+              "name": "Brooklyn Bikery",
+              "url": "https://brooklynbikery.com",
+              "address": {
+                "@type": "PostalAddress",
+                "streetAddress": "3149 Emmons Ave",
+                "addressLocality": "Brooklyn",
+                "addressRegion": "NY",
+                "postalCode": "11235",
+                "addressCountry": "US"
+              }
+            }
+          })}
+        </script>
       </Helmet>
       <Navbar />
 
@@ -53,9 +94,11 @@ export default function About() {
               <span className="mx-gradient-text">Smarter prices.</span>
             </h1>
             <p className="text-gray-400 text-lg leading-relaxed">
-              MachX Cycles started with a simple idea: you shouldn't have to pay full retail
-              to ride a great bike. We source, inspect, and certify premium pre-owned bikes
-              so you can get more ride for your money.
+              MachX Cycles is <a href="https://brooklynbikery.com" target="_blank" rel="noopener" className="text-white font-semibold hover:text-pink-300 transition-colors">Brooklyn Bikery</a>'s
+              online used-bike shop. The same Brooklyn mechanics who've been
+              wrenching, fitting, and selling bikes since 2020 (with a 4.9★ rating from 200+
+              Google reviews) now ship inspected, tuned bikes nationwide — at prices that
+              beat retail.
             </p>
           </div>
         </div>
@@ -81,9 +124,10 @@ export default function About() {
               sell it.
             </p>
             <p>
-              Based in Brooklyn, we've built a reputation for honest listings, accurate
-              descriptions, and bikes that show up dialed in and ready to roll. No surprises, no
-              disappointments — just great bikes at great prices.
+              Every bike on MachX is sourced, inspected, and tuned out of the
+              Brooklyn Bikery shop floor at 3149 Emmons Ave. The same mechanics who service
+              the neighborhood's bikes are the ones dialing in yours before it ships. No
+              surprises, no disappointments — just great bikes at great prices.
             </p>
           </div>
         </div>

@@ -4,6 +4,8 @@ import { RotateCcw, Truck, Search, ChevronDown, ChevronUp, CreditCard, Ruler } f
 import { Link } from 'react-router-dom'
 import Navbar from '../../components/store/Navbar'
 import Footer from '../../components/store/Footer'
+import { FRAME_SIZES } from '../../constants/sizes'
+import { safeJsonLd } from '../../utils/safeJsonLd'
 
 const POLICIES = [
   {
@@ -132,14 +134,6 @@ const FAQS = [
   },
 ]
 
-const SIZING_DATA = [
-  { frame: '13"', size: 'XS', minHeight: '4\'10"', maxHeight: '5\'2"' },
-  { frame: '15"', size: 'S', minHeight: '5\'2"', maxHeight: '5\'6"' },
-  { frame: '17"', size: 'M', minHeight: '5\'6"', maxHeight: '5\'10"' },
-  { frame: '19"', size: 'L', minHeight: '5\'10"', maxHeight: '6\'2"' },
-  { frame: '21"', size: 'XL', minHeight: '6\'2"', maxHeight: '6\'5"' },
-]
-
 function SizingChartContent() {
   return (
     <div>
@@ -148,17 +142,17 @@ function SizingChartContent() {
         <table className="w-full text-sm mb-4">
           <thead>
             <tr className="border-b border-gray-300">
-              <th className="text-left py-2 pr-4 font-semibold text-gray-700">Frame</th>
-              <th className="text-left py-2 pr-4 font-semibold text-gray-700">Size</th>
-              <th className="text-left py-2 pr-4 font-semibold text-gray-700">Min Height</th>
-              <th className="text-left py-2 font-semibold text-gray-700">Max Height</th>
+              <th className="text-left py-2 pr-4 font-semibold text-gray-700">Measured Frame Size</th>
+              <th className="text-left py-2 pr-4 font-semibold text-gray-700">Frame Size</th>
+              <th className="text-left py-2 pr-4 font-semibold text-gray-700">Min Rider Height</th>
+              <th className="text-left py-2 font-semibold text-gray-700">Max Rider Height</th>
             </tr>
           </thead>
           <tbody>
-            {SIZING_DATA.map((row, i) => (
-              <tr key={i} className="border-b border-gray-100">
+            {FRAME_SIZES.map(row => (
+              <tr key={row.code} className="border-b border-gray-100">
                 <td className="py-2 pr-4 text-gray-900">{row.frame}</td>
-                <td className="py-2 pr-4 text-gray-900">{row.size}</td>
+                <td className="py-2 pr-4 text-gray-900">{row.label}</td>
                 <td className="py-2 pr-4 text-gray-600">{row.minHeight}</td>
                 <td className="py-2 text-gray-600">{row.maxHeight}</td>
               </tr>
@@ -244,9 +238,28 @@ export default function Support() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Helmet>
-        <title>Support & Policies | MachX Cycles</title>
-        <meta name="description" content="MachX Cycles return policy, warranty info, and shipping details. 30-day returns, pre-owned bike inspection process, and customer support." />
+        <title>Support, Returns & FAQ | MachX Cycles</title>
+        <meta name="description" content="MachX Cycles return policy (30 days), shipping details, sizing guide, and answers to common questions about buying a pre-owned bike from us." />
         <link rel="canonical" href="https://machxcycles.com/support" />
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="Support, Returns & FAQ | MachX Cycles" />
+        <meta property="og:description" content="30-day returns, shipping details, sizing guide, and FAQ for buying a pre-owned bike from MachX." />
+        <meta property="og:url" content="https://machxcycles.com/support" />
+        <meta property="og:image" content="https://machxcycles.com/MachXPic.jpg" />
+        <meta name="twitter:title" content="Support, Returns & FAQ | MachX Cycles" />
+        <meta name="twitter:description" content="30-day returns, shipping, sizing guide, and FAQ." />
+        <meta name="twitter:image" content="https://machxcycles.com/MachXPic.jpg" />
+        <script type="application/ld+json">
+          {safeJsonLd({
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            "mainEntity": FAQS.map(f => ({
+              "@type": "Question",
+              "name": f.q,
+              "acceptedAnswer": { "@type": "Answer", "text": f.a }
+            }))
+          })}
+        </script>
       </Helmet>
       <Navbar />
 

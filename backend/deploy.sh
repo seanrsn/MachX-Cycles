@@ -12,6 +12,26 @@ set -e
 REGION="us-east-1"
 DIST_DIR="$(pwd)/dist"
 BACKEND_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$BACKEND_DIR/.." && pwd)"
+
+# Pre-flight: refuse to deploy if there's uncommitted drift in backend sources.
+# Background: bikes-public silently regressed for weeks because bikes_public.py
+# had local-only changes that were never committed. CI deploys build from main
+# and wipe the manually-deployed (correct) version with the stale committed one.
+# This guard catches that scenario before it can happen again. CI checkouts are
+# always clean, so this only fires for local deploys with uncommitted drift.
+if command -v git >/dev/null 2>&1 && [ -d "$REPO_ROOT/.git" ]; then
+  DRIFT="$(git -C "$REPO_ROOT" status --porcelain backend/functions backend/shared backend/deploy.sh backend/requirements.txt 2>/dev/null || true)"
+  if [ -n "$DRIFT" ] && [ -z "$ALLOW_DIRTY_DEPLOY" ]; then
+    echo "❌ Refusing to deploy: uncommitted drift in backend/"
+    echo ""
+    echo "$DRIFT"
+    echo ""
+    echo "   Commit (or stash) before deploying so CI builds match this one."
+    echo "   To bypass intentionally: ALLOW_DIRTY_DEPLOY=1 ./deploy.sh $*"
+    exit 1
+  fi
+fi
 
 mkdir -p "$DIST_DIR"
 
