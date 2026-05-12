@@ -58,7 +58,7 @@ export default function Footer() {
               <li><Link to="/about" className="text-gray-300 hover:text-white transition-colors">About Us</Link></li>
               <li><Link to="/contact" className="text-gray-300 hover:text-white transition-colors">Contact</Link></li>
               <li><a href="tel:+17182184464" className="text-gray-300 hover:text-white transition-colors">(718) 218-4464</a></li>
-              <li><a href="mailto:info@machxcycles.com" className="text-gray-300 hover:text-white transition-colors">info@machxcycles.com</a></li>
+              <li><a href="mailto:hello@machxcycles.com" className="text-gray-300 hover:text-white transition-colors">hello@machxcycles.com</a></li>
             </ul>
           </div>
         </div>

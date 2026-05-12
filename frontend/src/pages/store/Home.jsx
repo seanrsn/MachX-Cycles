@@ -88,7 +88,7 @@ export default function Home() {
             "image": "https://machxcycles.com/MachXPic.jpg",
             "description": "Certified pre-owned performance bicycles. Inspected, tuned, and ride-ready. Ships nationwide from Brooklyn, NY.",
             "telephone": "+1-718-218-4464",
-            "email": "info@machxcycles.com",
+            "email": "hello@machxcycles.com",
             "priceRange": "$$-$$$",
             "address": {
               "@type": "PostalAddress",

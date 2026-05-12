@@ -23,9 +23,9 @@ const CONTACT_INFO = [
   {
     icon: Mail,
     label: 'Email Us',
-    value: 'info@machxcycles.com',
+    value: 'hello@machxcycles.com',
     sub: 'Replies within 24 hours',
-    href: 'mailto:info@machxcycles.com',
+    href: 'mailto:hello@machxcycles.com',
   },
   {
     icon: Clock,
@@ -90,7 +90,7 @@ export default function Contact() {
             "name": "MachX Cycles",
             "url": "https://machxcycles.com/",
             "telephone": "+1-718-218-4464",
-            "email": "info@machxcycles.com",
+            "email": "hello@machxcycles.com",
             "priceRange": "$$-$$$",
             "address": {
               "@type": "PostalAddress",
