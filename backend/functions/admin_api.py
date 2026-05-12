@@ -110,6 +110,10 @@ def _require_admin(event):
 
 
 def _route(method, path, event):
+    # One-off migration runner — idempotent, safe to call repeatedly.
+    if path == '/admin/migrate' and method == 'POST':
+        return _run_migrations()
+
     # Bikes collection
     if _RE_BIKES.match(path):
         if method == 'GET':  return list_bikes(event)
@@ -248,6 +252,44 @@ def _unique_slug(cur, base_slug: str, exclude_id: int = None) -> str:
             return slug
         count += 1
         slug = f"{base_slug}-{count}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DB MIGRATIONS — idempotent. Add new ALTER TABLE statements here as needed.
+# Run via: aws lambda invoke admin-api with POST /admin/migrate
+# ─────────────────────────────────────────────────────────────────────────────
+
+_PENDING_MIGRATIONS = [
+    # 2026-05-12: shipping/tracking columns
+    ("orders", "tracking_number",   "ALTER TABLE orders ADD COLUMN tracking_number VARCHAR(100) DEFAULT NULL"),
+    ("orders", "tracking_carrier",  "ALTER TABLE orders ADD COLUMN tracking_carrier VARCHAR(20) DEFAULT NULL"),
+    ("orders", "shipped_at",        "ALTER TABLE orders ADD COLUMN shipped_at DATETIME DEFAULT NULL"),
+    ("orders", "estimated_delivery","ALTER TABLE orders ADD COLUMN estimated_delivery DATE DEFAULT NULL"),
+]
+
+
+def _run_migrations():
+    applied, skipped = [], []
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            for table, column, ddl in _PENDING_MIGRATIONS:
+                cur.execute(
+                    """SELECT 1 FROM information_schema.columns
+                       WHERE table_schema = DATABASE() AND table_name = %s AND column_name = %s LIMIT 1""",
+                    (table, column)
+                )
+                if cur.fetchone():
+                    skipped.append(f"{table}.{column}")
+                    continue
+                cur.execute(ddl)
+                applied.append(f"{table}.{column}")
+        conn.commit()
+        return success({'applied': applied, 'skipped': skipped})
+    except Exception as e:
+        conn.rollback()
+        print(f"_run_migrations error: {e}")
+        return error('Migration failed', status=500)
 
 
 def _log_order_event(cur, order_id: int, event_type: str, message: str, metadata: dict = None):
@@ -1093,6 +1135,9 @@ def get_order(order_id: int):
     return success(order)
 
 
+_VALID_CARRIERS = {'BIKEFLIGHTS', 'UPS', 'FEDEX', 'USPS', 'OTHER'}
+
+
 def update_order(order_id: int, event):
     body = parse_body(event)
 
@@ -1105,6 +1150,7 @@ def update_order(order_id: int, event):
                 return error('Order not found', status=404)
 
             set_parts, args = [], []
+            shipping_event_msg = None
 
             if 'status' in body:
                 set_parts.append("`status` = %s")
@@ -1113,6 +1159,39 @@ def update_order(order_id: int, event):
             if 'notes' in body:
                 set_parts.append("`notes` = %s")
                 args.append(body['notes'])
+
+            # Shipping fields — admin pastes tracking info here. When tracking
+            # is set for the first time, we auto-flip status to 'shipped',
+            # stamp shipped_at, and queue a customer notification email.
+            if 'tracking_number' in body or 'tracking_carrier' in body or 'estimated_delivery' in body:
+                tn = (body.get('tracking_number') or '').strip()
+                tc = (body.get('tracking_carrier') or '').strip().upper()
+                ed = body.get('estimated_delivery')  # YYYY-MM-DD or None
+
+                # Validate carrier
+                if tc and tc not in _VALID_CARRIERS:
+                    return error(f'Invalid carrier. Must be one of: {", ".join(sorted(_VALID_CARRIERS))}', status=400)
+                # Tracking number is required if a carrier is set, vice versa
+                if (tn and not tc) or (tc and not tn):
+                    return error('tracking_number and tracking_carrier must both be provided', status=400)
+
+                # Allow clearing (empty string sets to NULL)
+                set_parts.append("`tracking_number` = %s")
+                args.append(tn or None)
+                set_parts.append("`tracking_carrier` = %s")
+                args.append(tc or None)
+
+                if 'estimated_delivery' in body:
+                    set_parts.append("`estimated_delivery` = %s")
+                    args.append(ed if ed else None)
+
+                # First-time-shipped auto-actions
+                first_ship = tn and not existing.get('tracking_number')
+                if first_ship:
+                    set_parts.append("`shipped_at` = UTC_TIMESTAMP()")
+                    if existing.get('status') in (None, 'pending', 'confirmed', 'processing'):
+                        set_parts.append("`status` = 'shipped'")
+                    shipping_event_msg = f"Shipped via {tc} (tracking: {tn})"
 
             if not set_parts:
                 return error('No valid fields to update', status=400)
@@ -1130,12 +1209,82 @@ def update_order(order_id: int, event):
                     f"Status changed from {existing['status']} to {body['status']}"
                 )
 
+            if shipping_event_msg:
+                _log_order_event(cur, order_id, 'shipped', shipping_event_msg)
+
         conn.commit()
+
+        # Send customer email AFTER commit (best-effort, never breaks the save)
+        if shipping_event_msg:
+            _queue_shipped_email(order_id)
+
     except Exception:
         conn.rollback()
         raise
 
     return get_order(order_id)
+
+
+def _queue_shipped_email(order_id: int):
+    """Async-trigger the customer 'Your bike shipped' email via S3 regen-queue
+    pattern (same one we use for bike HTML regen). The non-VPC sibling Lambda
+    handles the Resend API call since admin-api can't reach the public
+    internet from inside its VPC."""
+    try:
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, order_number, customer_name, customer_email,
+                          shipping_address, total, tracking_number, tracking_carrier,
+                          estimated_delivery, shipped_at
+                   FROM orders WHERE id = %s""",
+                (order_id,)
+            )
+            order = cur.fetchone()
+            cur.execute(
+                """SELECT oi.unit_price, oi.quantity, b.name AS bike_name
+                   FROM order_items oi LEFT JOIN bikes b ON b.id = oi.bike_id
+                   WHERE oi.order_id = %s""",
+                (order_id,)
+            )
+            items = cur.fetchall()
+        if not order:
+            return
+
+        # JSON-safe convert
+        payload_order = {}
+        for k, v in order.items():
+            if v is None:
+                payload_order[k] = None
+            elif hasattr(v, 'isoformat'):
+                payload_order[k] = v.isoformat()
+            elif isinstance(v, (int, float, bool, str)):
+                payload_order[k] = v
+            else:
+                payload_order[k] = str(v)
+        payload_items = []
+        for it in items:
+            payload_items.append({
+                'bike_name': it.get('bike_name') or 'Bike',
+                'quantity':  int(it.get('quantity', 1)),
+                'unit_price': float(it.get('unit_price', 0)) if it.get('unit_price') is not None else 0,
+            })
+
+        s3 = boto3.client('s3', region_name=AWS_REGION)
+        key = f"regen-queue/email-shipped-{order_id}-{int(datetime.utcnow().timestamp() * 1000)}.json"
+        s3.put_object(
+            Bucket='machx-cycles-frontend',
+            Key=key,
+            Body=json.dumps({
+                'action': 'send_shipped_email',
+                'order':  payload_order,
+                'items':  payload_items,
+            }).encode('utf-8'),
+            ContentType='application/json',
+        )
+        print(f"_queue_shipped_email: queued shipped-email for order {order_id} via {key}")
+    except Exception as e:
+        print(f"_queue_shipped_email: failed for order {order_id}: {e}")
 
 
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

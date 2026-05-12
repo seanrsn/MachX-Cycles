@@ -2,7 +2,15 @@ import { useState } from 'react'
 import { Helmet } from 'react-helmet-async'
 import { lookupOrder } from '../../api/public'
 import { safeJsonLd } from '../../utils/safeJsonLd'
-import { Search, Package } from 'lucide-react'
+import { Search, Package, Truck, ExternalLink } from 'lucide-react'
+
+const CARRIER_LABELS = {
+  BIKEFLIGHTS: 'BikeFlights',
+  UPS:         'UPS',
+  FEDEX:       'FedEx',
+  USPS:        'USPS',
+  OTHER:       'Carrier',
+}
 import Navbar from '../../components/store/Navbar'
 
 const STATUS_COLOR = {
@@ -144,6 +152,33 @@ export default function OrderLookup() {
                 <span>${parseFloat(order.total ?? order.total_amount ?? 0).toFixed(2)}</span>
               </div>
             </div>
+
+            {order.tracking_number && (
+              <div className="px-6 py-4 border-t border-gray-100 bg-gradient-to-r from-pink-50/40 to-orange-50/40">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-white rounded-lg shadow-sm shrink-0">
+                    <Truck size={20} className="text-pink-600" strokeWidth={1.75} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1">Shipped via {CARRIER_LABELS[order.tracking_carrier] || 'Carrier'}</p>
+                    <p className="font-mono text-sm text-gray-900 break-all">{order.tracking_number}</p>
+                    {order.estimated_delivery && (
+                      <p className="text-xs text-gray-600 mt-1">Estimated delivery: <span className="font-semibold">{new Date(order.estimated_delivery).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span></p>
+                    )}
+                    {order.tracking_url && (
+                      <a
+                        href={order.tracking_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 mt-2 text-sm font-semibold text-pink-600 hover:text-pink-700"
+                      >
+                        Track shipment <ExternalLink size={13} />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {order.events?.length > 0 && (
               <div className="px-6 py-4 border-t border-gray-100">

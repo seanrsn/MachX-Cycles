@@ -189,6 +189,153 @@ def _build_head(bike):
 """
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SHIPPED-EMAIL via Resend
+# ─────────────────────────────────────────────────────────────────────────────
+
+import urllib.request
+import urllib.error
+from html import escape as html_escape
+
+RESEND_FROM = 'MachX Cycles <hello@machxcycles.com>'
+_RESEND_KEY = None
+
+def _get_resend_key():
+    global _RESEND_KEY
+    if _RESEND_KEY is None:
+        try:
+            sm = boto3.client('secretsmanager', region_name='us-east-1')
+            resp = sm.get_secret_value(SecretId='machx-resend-key')
+            _RESEND_KEY = json.loads(resp['SecretString'])['api_key']
+        except Exception as e:
+            print(f"[shipped-email] cannot fetch Resend key: {e}")
+            return None
+    return _RESEND_KEY
+
+
+_TRACKING_URLS = {
+    'BIKEFLIGHTS': 'https://www.bikeflights.com/track?tracking={n}',
+    'UPS':         'https://www.ups.com/track?tracknum={n}',
+    'FEDEX':       'https://www.fedex.com/fedextrack/?trknbr={n}',
+    'USPS':        'https://tools.usps.com/go/TrackConfirmAction?tLabels={n}',
+    'OTHER':       None,
+}
+
+def _carrier_label(c):
+    return {'BIKEFLIGHTS':'BikeFlights','UPS':'UPS','FEDEX':'FedEx','USPS':'USPS','OTHER':'Carrier'}.get(c, c or 'Carrier')
+
+
+def _send_shipped_email(payload):
+    """Send the customer 'Your bike shipped' email via Resend."""
+    try:
+        order = payload.get('order') or {}
+        items = payload.get('items') or []
+        to_email = (order.get('customer_email') or '').strip()
+        if not to_email:
+            return {'ok': False, 'reason': 'no_email'}
+
+        api_key = _get_resend_key()
+        if not api_key:
+            return {'ok': False, 'reason': 'no_resend_key'}
+
+        order_number = order.get('order_number') or ''
+        customer = order.get('customer_name') or 'there'
+        carrier = (order.get('tracking_carrier') or 'OTHER').upper()
+        tracking_number = order.get('tracking_number') or ''
+        carrier_label = _carrier_label(carrier)
+        url_template = _TRACKING_URLS.get(carrier)
+        tracking_url = url_template.replace('{n}', tracking_number) if url_template else None
+        est = order.get('estimated_delivery')
+
+        items_html = ''.join(
+            f'<li style="margin:6px 0;">{html_escape(it["bike_name"])}'
+            + (f' &times; {it["quantity"]}' if it.get("quantity", 1) > 1 else '')
+            + '</li>'
+            for it in items
+        )
+
+        track_button_html = (
+            f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 16px 0;">'
+            f'<tr><td align="center"><a href="{html_escape(tracking_url)}" style="display:inline-block;background:linear-gradient(135deg,#ec4899 0%,#f97316 100%);color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:600;font-size:15px;">Track with {html_escape(carrier_label)} &rarr;</a></td></tr></table>'
+        ) if tracking_url else ''
+
+        est_html = f'<p style="margin:8px 0 0 0;color:#374151;font-size:14px;"><strong>Estimated delivery:</strong> {html_escape(est)}</p>' if est else ''
+
+        html_body = f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;padding:24px 0;">
+    <tr><td align="center">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+        <tr><td style="background:linear-gradient(135deg,#ec4899 0%,#f97316 100%);padding:28px 32px;text-align:center;">
+          <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.01em;">MachX Cycles</h1>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <h2 style="margin:0 0 8px 0;font-size:20px;font-weight:700;color:#111827;">Your bike is on the way, {html_escape(customer.split()[0] if customer else 'there')}!</h2>
+          <p style="margin:0 0 20px 0;color:#6b7280;font-size:14px;">We just dropped off your order with {html_escape(carrier_label)}.</p>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:8px;padding:16px;margin:0 0 20px 0;">
+            <tr><td>
+              <p style="margin:0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Order</p>
+              <p style="margin:4px 0 12px 0;color:#111827;font-size:16px;font-weight:700;font-family:'SF Mono',Menlo,monospace;">{html_escape(order_number)}</p>
+              <p style="margin:0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Tracking number</p>
+              <p style="margin:4px 0 0 0;color:#111827;font-size:16px;font-weight:700;font-family:'SF Mono',Menlo,monospace;">{html_escape(tracking_number)}</p>
+              {est_html}
+            </td></tr>
+          </table>
+          {('<h3 style="margin:0 0 8px 0;font-size:14px;font-weight:600;color:#111827;text-transform:uppercase;letter-spacing:0.05em;">In this shipment</h3><ul style="margin:0 0 20px 0;padding-left:20px;color:#374151;font-size:15px;">' + items_html + '</ul>') if items_html else ''}
+          {track_button_html}
+          <p style="margin:24px 0 0 0;color:#6b7280;font-size:13px;line-height:1.5;">Want to check status anytime? Use your email and order number <strong style="color:#111827;font-family:'SF Mono',Menlo,monospace;">{html_escape(order_number)}</strong> at <a href="https://machxcycles.com/track-order" style="color:#ec4899;text-decoration:none;">machxcycles.com/track-order</a>.</p>
+        </td></tr>
+        <tr><td style="background:#f9fafb;padding:20px 32px;border-top:1px solid #e5e7eb;text-align:center;">
+          <p style="margin:0;color:#6b7280;font-size:13px;">Questions? Just reply to this email.</p>
+          <p style="margin:8px 0 0 0;color:#9ca3af;font-size:12px;">MachX Cycles &middot; Brooklyn Bikery &middot; 3149 Emmons Ave, Brooklyn, NY 11235</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+
+        text_body = (
+            f"Your bike is on the way, {customer.split()[0] if customer else 'there'}!\n\n"
+            f"Order: {order_number}\n"
+            f"Tracking: {tracking_number} ({carrier_label})\n"
+            f"{('Estimated delivery: ' + est + chr(10)) if est else ''}\n"
+            + (f"Track with {carrier_label}: {tracking_url}\n\n" if tracking_url else '')
+            + f"Or check status at: https://machxcycles.com/track-order\n\n"
+            f"Questions? Reply to this email.\n\n"
+            f"- MachX Cycles\n"
+            f"3149 Emmons Ave, Brooklyn, NY 11235"
+        )
+
+        payload_json = json.dumps({
+            'from':     RESEND_FROM,
+            'to':       [to_email],
+            'subject':  f'Your bike is on the way! - {order_number}',
+            'html':     html_body,
+            'text':     text_body,
+            'reply_to': 'hello@machxcycles.com',
+            'headers':  {'X-Entity-Ref-ID': order_number},
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.resend.com/emails',
+            data=payload_json,
+            headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+            method='POST',
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                body = r.read().decode('utf-8')
+            print(f"[shipped-email] sent for order {order_number}: {body[:200]}")
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode('utf-8', errors='ignore')[:300]
+            print(f"[shipped-email] HTTP {e.code} for order {order_number}: {err_body}")
+            return {'ok': False, 'reason': 'send_failed'}
+        return {'ok': True, 'action': 'shipped_email_sent'}
+    except Exception as e:
+        print(f"[shipped-email] crashed: {e}")
+        return {'ok': False, 'reason': 'crash'}
+
+
 def _invalidate(slug):
     try:
         cf.create_invalidation(
@@ -205,7 +352,10 @@ def _invalidate(slug):
 # ── Lambda handler ──────────────────────────────────────────────────────────
 
 def _process_one(payload):
-    """Run the regen for a single payload. Returns dict result."""
+    """Run the right action for a single payload. Returns dict result."""
+    action = payload.get('action', 'upsert')
+    if action == 'send_shipped_email':
+        return _send_shipped_email(payload)
     bike = payload.get('bike') or {}
     slug = bike.get('slug')
     if not slug:

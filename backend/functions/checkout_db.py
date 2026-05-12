@@ -363,6 +363,22 @@ def update_session_pi(body):
 
 # ── lookup_order ─────────────────────────────────────────────────────────────
 
+_CARRIER_TRACKING_URLS = {
+    'BIKEFLIGHTS': 'https://www.bikeflights.com/track?tracking={n}',
+    'UPS':         'https://www.ups.com/track?tracknum={n}',
+    'FEDEX':       'https://www.fedex.com/fedextrack/?trknbr={n}',
+    'USPS':        'https://tools.usps.com/go/TrackConfirmAction?tLabels={n}',
+}
+
+def _tracking_url(carrier, number):
+    """Build a public click-through tracking URL. Returns None for OTHER or
+    when carrier/number missing."""
+    if not carrier or not number:
+        return None
+    tmpl = _CARRIER_TRACKING_URLS.get(carrier.upper())
+    return tmpl.replace('{n}', str(number)) if tmpl else None
+
+
 def lookup_order(body):
     """Customer-facing lookup. Checks `orders` (real, paid orders) first;
     falls back to `checkout_sessions` so a customer who just paid can find
@@ -383,7 +399,8 @@ def lookup_order(body):
         cur.execute(
             """
             SELECT id, order_number, status, payment_status,
-                   subtotal, discount_amount, shipping_fee, total, created_at
+                   subtotal, discount_amount, shipping_fee, total, created_at,
+                   tracking_number, tracking_carrier, shipped_at, estimated_delivery
             FROM orders
             WHERE customer_email = %s AND order_number = %s
             """,
@@ -391,6 +408,10 @@ def lookup_order(body):
         )
         order = cur.fetchone()
         if order:
+            # Append a public tracking URL based on carrier so the frontend
+            # doesn't have to maintain its own URL templates.
+            order['tracking_url'] = _tracking_url(order.get('tracking_carrier'), order.get('tracking_number'))
+
             cur.execute(
                 """
                 SELECT oi.id, oi.bike_id, oi.quantity, oi.unit_price,
@@ -401,7 +422,23 @@ def lookup_order(body):
                 """,
                 (order['id'],)
             )
-            return {'order': order, 'items': cur.fetchall()}
+            items = cur.fetchall()
+
+            # Public-facing event timeline. Filter to types meaningful to the
+            # customer (skip internal ones like admin_release_reservation etc.)
+            cur.execute(
+                """
+                SELECT event_type, message, created_at
+                FROM order_events
+                WHERE order_id = %s
+                  AND event_type IN ('created','status_change','shipped','payment_succeeded','delivered','cancelled')
+                ORDER BY created_at ASC
+                """,
+                (order['id'],)
+            )
+            events = cur.fetchall()
+
+            return {'order': order, 'items': items, 'events': events}
 
         # Pending session — payment may have just succeeded but webhook hasn't
         # materialized yet. Show a "processing" placeholder so the customer

@@ -645,7 +645,9 @@ def _send_customer_order_email(order: dict, addr: dict | None) -> None:
         payload = json.dumps({
             'from':    _RESEND_FROM,
             'to':      [to_email],
-            'subject': f'Order confirmed — {order_number}',
+            # Subject uses ASCII hyphen (not em-dash) so headers stay 7-bit
+            # clean and don't need MIME-encoding. Body is UTF-8 and fine.
+            'subject': f'Order confirmed - {order_number}',
             'html':    html_body,
             'text':    text_body,
             'reply_to': 'hello@machxcycles.com',
