@@ -5,7 +5,7 @@ import { Trash2, Bike, ShoppingCart, ChevronRight, Lock, Loader2 } from 'lucide-
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
 
-import { getShippingRates, createOrder, getBike } from '../../api/public'
+import { getShippingRates, createOrder, getBikes } from '../../api/public'
 import { getBuyerToken } from '../../utils/buyerToken'
 import { useCartStore, selectSubtotal } from '../../store/cartStore'
 import Navbar from '../../components/store/Navbar'
@@ -53,20 +53,24 @@ function CartStep({ items, onRemove, subtotal, onNext }) {
     let cancelled = false
     if (items.length === 0) { setValidating(false); return }
     ;(async () => {
-      const dead = []
-      await Promise.all(items.map(async (item) => {
-        try {
-          const bike = await getBike(item.bikeId)
-          if (!bike || bike.is_active === 0 || bike.sold === 1) {
-            dead.push(item)
-          }
-        } catch {
-          // 404 / network — treat as unavailable; the user can re-add later
-          // if they hit a transient error.
-          dead.push(item)
-        }
-      }))
+      // One list call returns every active+available bike (the API filters
+      // out sold/inactive). Anything in the cart that's NOT in the response
+      // is stale and gets pruned. Avoids per-item GET /bikes/{id} which
+      // wouldn't work for legacy carts that store numeric IDs (the API
+      // does slug-only routing now).
+      let availableIds = null
+      try {
+        const res = await getBikes({ limit: 500 })
+        availableIds = new Set((res.bikes || []).map(b => Number(b.id)))
+      } catch {
+        // Transient network error — don't prune the cart silently. Better
+        // to let the user retry checkout than wipe their cart on a flaky
+        // request.
+        if (!cancelled) setValidating(false)
+        return
+      }
       if (cancelled) return
+      const dead = items.filter(item => !availableIds.has(Number(item.bikeId)))
       if (dead.length > 0) {
         dead.forEach(d => onRemove(d.bikeId))
         setPruned(dead.map(d => d.bikeName || 'A bike'))
