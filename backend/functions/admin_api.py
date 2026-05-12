@@ -260,6 +260,256 @@ def _log_order_event(cur, order_id: int, event_type: str, message: str, metadata
     )
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# PER-BIKE STATIC HTML REGENERATION
+#
+# Every active bike has a prerendered /bikes/{slug}/index.html in S3 so
+# crawlers + social-preview bots see real meta tags (title, description, OG,
+# Twitter, JSON-LD Product). The Vite build's prerender script generates these
+# at build time — but admin actions happen live, so we regenerate the HTML
+# inline whenever a bike is created / updated / deactivated.
+#
+# Approach: read the SPA shell from S3 root, swap in per-bike <head> tags,
+# write to /bikes/{slug}/index.html. Body stays as the unchanged SPA shell;
+# React hydrates and renders the bike-detail UI client-side, same as a real
+# prerendered page.
+#
+# Failure-tolerant: any exception is logged but doesn't break the admin save.
+# ──────────────────────────────────────────────────────────────────────────────
+
+FRONTEND_BUCKET = 'machx-cycles-frontend'
+CLOUDFRONT_DIST = 'E1DA2WCWTOBSNO'
+SITE_ORIGIN     = 'https://machxcycles.com'
+
+
+def _safe_jsonld(obj):
+    """Same escape as frontend safeJsonLd: prevent </script> breakout + safe Unicode."""
+    s = json.dumps(obj, ensure_ascii=False)
+    return (s
+        .replace('<', '\\u003c')
+        .replace('>', '\\u003e')
+        .replace('&', '\\u0026')
+        .replace(' ', '\\u2028')
+        .replace(' ', '\\u2029'))
+
+
+def _html_attr_escape(s):
+    """Escape for use inside an HTML attribute value (between double quotes)."""
+    if s is None:
+        return ''
+    return (str(s)
+        .replace('&', '&amp;')
+        .replace('"', '&quot;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;'))
+
+
+def _category_slug(name):
+    """Mirrors src/utils/categorySlug.js — keep in sync."""
+    if not name:
+        return ''
+    s = re.sub(r'[^a-z0-9]+', '-', str(name).lower())
+    return s.strip('-')
+
+
+def _build_bike_meta_html(bike: dict) -> str:
+    """Generate the per-bike <head> snippet (title + meta + JSON-LD)."""
+    name = bike.get('name') or 'Bike'
+    slug = bike.get('slug') or ''
+    category_name = bike.get('category_name') or ''
+    description = (bike.get('description') or '').strip()
+    price = bike.get('base_price') or 0
+    try:
+        price_str = f"{float(price):.2f}"
+    except (TypeError, ValueError):
+        price_str = '0.00'
+    sold = bool(bike.get('sold'))
+    image_url = ''
+    images = bike.get('images') or []
+    if images:
+        image_url = (images[0] or {}).get('url') or ''
+    canonical = f"{SITE_ORIGIN}/bikes/{slug}"
+
+    # Title — keep under ~62 chars for SERP
+    base_title = f"{name} — Used {category_name}".strip()
+    cap = 45
+    if len(base_title) <= cap:
+        title = f"{base_title} | MachX Cycles"
+    else:
+        cut = base_title[:cap]
+        last_space = cut.rfind(' ')
+        truncated = cut[:last_space] if last_space > 25 else cut
+        title = f"{truncated} | MachX Cycles"
+
+    # Description — 152 chars max, word-boundary
+    if description:
+        d = description[:152]
+        last_space = d.rfind(' ')
+        meta_desc = (d[:last_space] if last_space > 100 else d) + '…'
+    else:
+        cat_lower = category_name.lower() if category_name else 'bike'
+        price_part = f" Now ${float(price):,.2f}." if float(price or 0) > 0 else ''
+        meta_desc = f"Shop the {name} at MachX Cycles. Pre-owned {cat_lower}, inspected and tuned.{price_part}"
+
+    og_image = image_url or f"{SITE_ORIGIN}/MachXPic.jpg"
+
+    # JSON-LD Product
+    product_ld = {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": name,
+        "description": description or f"Pre-owned {category_name or ''} bike from MachX Cycles",
+        "sku": str(bike.get('id', '')),
+        "itemCondition": "https://schema.org/UsedCondition",
+        "category": category_name or None,
+        "material": bike.get('material') or None,
+        "offers": {
+            "@type": "Offer",
+            "url": canonical,
+            "priceCurrency": "USD",
+            "price": price_str,
+            "priceValidUntil": (datetime.utcnow().date().replace(year=datetime.utcnow().year + 1)).isoformat(),
+            "itemCondition": "https://schema.org/UsedCondition",
+            "availability": "https://schema.org/OutOfStock" if sold else "https://schema.org/InStock",
+            "seller": {
+                "@type": "Organization",
+                "name": "MachX Cycles",
+                "url": "https://machxcycles.com/",
+            },
+        },
+    }
+    if image_url:
+        product_ld["image"] = image_url
+    brand = bike.get('brand')
+    if brand and brand != 'MachX':
+        product_ld["brand"] = {"@type": "Brand", "name": brand}
+    if bike.get('model_year'):
+        product_ld["productionDate"] = str(bike['model_year'])
+    # Drop None values for clean JSON
+    product_ld = {k: v for k, v in product_ld.items() if v is not None}
+
+    breadcrumb_ld = {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{SITE_ORIGIN}/"},
+            {"@type": "ListItem", "position": 2, "name": "Shop", "item": f"{SITE_ORIGIN}/shop"},
+        ],
+    }
+    if category_name:
+        breadcrumb_ld["itemListElement"].append({
+            "@type": "ListItem", "position": 3, "name": category_name,
+            "item": f"{SITE_ORIGIN}/shop/{_category_slug(category_name)}",
+        })
+        breadcrumb_ld["itemListElement"].append({
+            "@type": "ListItem", "position": 4, "name": name, "item": canonical,
+        })
+    else:
+        breadcrumb_ld["itemListElement"].append({
+            "@type": "ListItem", "position": 3, "name": name, "item": canonical,
+        })
+
+    title_esc = _html_attr_escape(title)
+    desc_esc  = _html_attr_escape(meta_desc)
+    canonical_esc = _html_attr_escape(canonical)
+    og_image_esc  = _html_attr_escape(og_image)
+    og_title_esc  = _html_attr_escape(f"{name} — Used | MachX Cycles")
+    og_desc_short = _html_attr_escape(
+        (description[:200] if description else f"Pre-owned {category_name.lower() if category_name else 'bike'} — inspected and ride-ready.")
+    )
+
+    return f"""<title>{title_esc}</title>
+<meta name="description" content="{desc_esc}" data-bike-meta>
+<link rel="canonical" href="{canonical_esc}" data-bike-meta>
+<meta property="og:type" content="product" data-bike-meta>
+<meta property="og:title" content="{og_title_esc}" data-bike-meta>
+<meta property="og:description" content="{og_desc_short}" data-bike-meta>
+<meta property="og:url" content="{canonical_esc}" data-bike-meta>
+<meta property="og:image" content="{og_image_esc}" data-bike-meta>
+<meta property="og:price:amount" content="{price_str}" data-bike-meta>
+<meta property="og:price:currency" content="USD" data-bike-meta>
+<meta property="product:price:amount" content="{price_str}" data-bike-meta>
+<meta property="product:price:currency" content="USD" data-bike-meta>
+<meta name="twitter:card" content="summary_large_image" data-bike-meta>
+<meta name="twitter:title" content="{og_title_esc}" data-bike-meta>
+<meta name="twitter:description" content="{og_desc_short}" data-bike-meta>
+<meta name="twitter:image" content="{og_image_esc}" data-bike-meta>
+<script type="application/ld+json" data-bike-meta>{_safe_jsonld(product_ld)}</script>
+<script type="application/ld+json" data-bike-meta>{_safe_jsonld(breadcrumb_ld)}</script>
+"""
+
+
+_REGEN_S3 = None
+def _regen_s3():
+    """S3 client — VPC has an S3 gateway endpoint so this works without NAT."""
+    global _REGEN_S3
+    if _REGEN_S3 is None:
+        _REGEN_S3 = boto3.client('s3', region_name=AWS_REGION)
+    return _REGEN_S3
+
+
+def _regenerate_bike_html(bike_id: int, action: str = 'upsert'):
+    """Drop a regen-trigger file into S3 so the (non-VPC) sibling Lambda
+    machx-bike-html-regen picks it up and regenerates /bikes/{slug}/index.html.
+
+    Why not just call lambda.invoke or do the S3 work inline?
+    - admin-api lives in a VPC for RDS access. The VPC has an S3 *gateway*
+      endpoint (default, free) so S3 PutObject works. But Lambda + CloudFront
+      service endpoints aren't reachable from the VPC without NAT/interface
+      endpoints, which need IAM perms we don't have.
+    - So we write a trigger file to s3://machx-cycles-frontend/regen-queue/...
+      and an S3 ObjectCreated event fires the regen Lambda (outside the VPC).
+      That Lambda reads the bike payload, regenerates the HTML, and deletes
+      the trigger file. Fire-and-forget; admin save returns immediately.
+
+    Best-effort: any failure is logged but doesn't break the admin save.
+    """
+    try:
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT b.id, b.slug, b.name, b.description, b.base_price,
+                          b.material, b.brand, b.model_year, b.is_active, b.sold,
+                          c.name AS category_name,
+                          (SELECT bi.url FROM bike_images bi WHERE bi.bike_id = b.id
+                           ORDER BY bi.sort_order ASC LIMIT 1) AS first_image_url
+                   FROM bikes b LEFT JOIN categories c ON c.id = b.category_id
+                   WHERE b.id = %s""",
+                (bike_id,)
+            )
+            bike = cur.fetchone()
+        if not bike or not bike.get('slug'):
+            return
+
+        # Convert Decimal/date types to JSON-safe primitives
+        payload_bike = {}
+        for k, v in bike.items():
+            if v is None:
+                payload_bike[k] = None
+            elif hasattr(v, 'isoformat'):
+                payload_bike[k] = v.isoformat()
+            elif isinstance(v, (int, float, bool, str)):
+                payload_bike[k] = v
+            else:
+                payload_bike[k] = str(v)  # Decimal, etc.
+
+        trigger_key = f"regen-queue/bike-{bike_id}-{int(datetime.utcnow().timestamp() * 1000)}.json"
+        body = json.dumps({'action': action, 'bike': payload_bike}).encode('utf-8')
+
+        try:
+            _regen_s3().put_object(
+                Bucket='machx-cycles-frontend',
+                Key=trigger_key,
+                Body=body,
+                ContentType='application/json',
+            )
+            print(f"_regenerate_bike_html: queued regen for bike {bike_id} via {trigger_key}")
+        except Exception as e:
+            print(f"_regenerate_bike_html: S3 put failed for bike {bike_id}: {e}")
+    except Exception as e:
+        print(f"_regenerate_bike_html: unexpected error for bike {bike_id}: {e}")
+
+
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # BIKES
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -378,6 +628,10 @@ def create_bike(event):
             bike_id = cur.lastrowid
         conn.commit()
 
+        # Generate the per-bike static HTML so /bikes/{slug} works immediately
+        # (and crawlers + social-preview bots see real meta tags).
+        _regenerate_bike_html(bike_id)
+
         return get_bike(bike_id)  # re-fetch and return full record
     except Exception:
         conn.rollback()
@@ -437,6 +691,10 @@ def update_bike(bike_id: int, event):
         conn.rollback()
         raise
 
+    # Regenerate the per-bike static HTML to reflect the update (or remove it
+    # if the bike was just deactivated/marked sold).
+    _regenerate_bike_html(bike_id)
+
     return get_bike(bike_id)
 
 
@@ -452,6 +710,8 @@ def delete_bike(bike_id: int):
     except Exception:
         conn.rollback()
         raise
+    # Soft-delete sets is_active=0 → regen will delete the HTML
+    _regenerate_bike_html(bike_id)
     return success({'message': f'Bike {bike_id} deactivated'})
 
 
