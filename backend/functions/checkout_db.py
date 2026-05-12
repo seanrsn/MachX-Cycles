@@ -147,9 +147,20 @@ def create_session(body):
                 )
                 bike = cur.fetchone()
                 if not bike:
-                    return {'error': f'Bike {bike_id} not found or inactive'}
+                    # Don't leak the internal bike_id in user-facing copy.
+                    # `code: item_unavailable` lets the frontend prune the
+                    # offending cart entry automatically.
+                    return {
+                        'error': 'One of the bikes in your cart is no longer available.',
+                        'code': 'item_unavailable',
+                        'unavailable_bike_id': bike_id,
+                    }
                 if bike['sold']:
-                    return {'error': f'"{bike["bike_name"]}" is already sold'}
+                    return {
+                        'error': f'"{bike["bike_name"]}" is already sold.',
+                        'code': 'item_sold',
+                        'unavailable_bike_id': bike_id,
+                    }
 
                 state = bike['reservation_state']
                 rsvd  = bike['reserved_until']

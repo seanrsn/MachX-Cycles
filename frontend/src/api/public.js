@@ -13,7 +13,15 @@ async function post(path, body) {
     body:    JSON.stringify(body),
   })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || `Request failed: ${res.status}`)
+  if (!res.ok) {
+    // Preserve structured error fields (code, unavailable_bike_id, etc.)
+    // so callers can do smart things — e.g. auto-prune a stale cart item
+    // when the backend returns code: 'item_unavailable'.
+    const err = new Error(data.error || `Request failed: ${res.status}`)
+    err.code = data.code
+    err.data = data
+    throw err
+  }
   return data
 }
 

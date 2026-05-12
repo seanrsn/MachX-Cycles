@@ -5,7 +5,8 @@ import { Trash2, Bike, ShoppingCart, ChevronRight, Lock, Loader2 } from 'lucide-
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
 
-import { getShippingRates, createOrder } from '../../api/public'
+import { getShippingRates, createOrder, getBike } from '../../api/public'
+import { getBuyerToken } from '../../utils/buyerToken'
 import { useCartStore, selectSubtotal } from '../../store/cartStore'
 import Navbar from '../../components/store/Navbar'
 
@@ -39,11 +40,51 @@ function StepIndicator({ step }) {
 
 // ── Step 0: Cart ───────────────────────────────────────────────────────────────
 
-function CartStep({ items, onRemove, onQty, subtotal, onNext }) {
-  if (items.length === 0) return (
+function CartStep({ items, onRemove, subtotal, onNext }) {
+  // Cart is in localStorage so items can outlive the bike's life on the server
+  // (admin deactivates / sells / deletes a bike while it's in someone's cart).
+  // On mount: validate every item against the live API and auto-prune stale
+  // ones. Show a one-shot banner naming what got removed so the user isn't
+  // confused by a silent cart-shrink.
+  const [pruned, setPruned] = useState([])
+  const [validating, setValidating] = useState(items.length > 0)
+
+  useEffect(() => {
+    let cancelled = false
+    if (items.length === 0) { setValidating(false); return }
+    ;(async () => {
+      const dead = []
+      await Promise.all(items.map(async (item) => {
+        try {
+          const bike = await getBike(item.bikeId)
+          if (!bike || bike.is_active === 0 || bike.sold === 1) {
+            dead.push(item)
+          }
+        } catch {
+          // 404 / network — treat as unavailable; the user can re-add later
+          // if they hit a transient error.
+          dead.push(item)
+        }
+      }))
+      if (cancelled) return
+      if (dead.length > 0) {
+        dead.forEach(d => onRemove(d.bikeId))
+        setPruned(dead.map(d => d.bikeName || 'A bike'))
+      }
+      setValidating(false)
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])  // run once on mount; cart array is stable enough here
+
+  if (items.length === 0 && !validating) return (
     <div className="text-center py-16">
       <ShoppingCart size={48} className="mx-auto text-gray-300 mb-4" />
-      <p className="text-gray-500 mb-4">Your cart is empty</p>
+      <p className="text-gray-500 mb-4">
+        {pruned.length > 0
+          ? `${pruned.join(', ')} ${pruned.length === 1 ? 'is' : 'are'} no longer available — your cart is now empty.`
+          : 'Your cart is empty'}
+      </p>
       <Link to="/shop" className="inline-block bg-pink-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-pink-700 transition-colors">
         Shop Now
       </Link>
@@ -52,8 +93,13 @@ function CartStep({ items, onRemove, onQty, subtotal, onNext }) {
 
   return (
     <div className="space-y-4">
+      {pruned.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-3">
+          <strong>Removed from your cart:</strong> {pruned.join(', ')} — no longer available.
+        </div>
+      )}
       {items.map(item => (
-        <div key={item.variantId} className="flex items-center gap-4 bg-white rounded-xl border border-gray-200 p-4">
+        <div key={item.bikeId} className="flex items-center gap-4 bg-white rounded-xl border border-gray-200 p-4">
           <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-100 shrink-0">
             {item.imageUrl
               ? <img src={item.imageUrl} alt={item.bikeName} className="w-full h-full object-cover" />
@@ -62,17 +108,17 @@ function CartStep({ items, onRemove, onQty, subtotal, onNext }) {
           </div>
           <div className="flex-1 min-w-0">
             <p className="font-semibold text-gray-900 truncate">{item.bikeName}</p>
-            <p className="text-sm text-gray-500">{item.variantLabel}</p>
             <p className="font-bold text-gray-900 mt-1">
-              ${(item.price * item.quantity).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              ${parseFloat(item.price).toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => onQty(item.variantId, item.quantity - 1)} className="w-8 h-8 rounded-full border border-gray-300 flex items-center justify-center text-gray-700 hover:border-pink-500">−</button>
-            <span className="w-6 text-center text-sm font-medium">{item.quantity}</span>
-            <button onClick={() => onQty(item.variantId, item.quantity + 1)} className="w-8 h-8 rounded-full border border-gray-300 flex items-center justify-center text-gray-700 hover:border-pink-500">+</button>
-            <button onClick={() => onRemove(item.variantId)} className="ml-1 text-gray-400 hover:text-red-500 p-1"><Trash2 size={15} /></button>
-          </div>
+          <button
+            onClick={() => onRemove(item.bikeId)}
+            className="text-gray-400 hover:text-red-500 p-2"
+            aria-label="Remove from cart"
+          >
+            <Trash2 size={16} />
+          </button>
         </div>
       ))}
 
@@ -321,6 +367,7 @@ function PaymentStep({ items, form, shipping, subtotal, onBack, onSuccess }) {
   const [error, setError] = useState('')
   const [orderInfo, setOrderInfo] = useState(null)
   const [clientSecret, setClientSecret] = useState(null)
+  const removeItem = useCartStore(s => s.removeItem)
 
   const shippingCost = shipping ? parseFloat(shipping.price ?? 0) : 0
 
@@ -340,7 +387,8 @@ function PaymentStep({ items, form, shipping, subtotal, onBack, onSuccess }) {
             country: form.country,
           },
           shipping_rate_id: shipping.id,
-          items: items.map(i => ({ variant_id: i.variantId, quantity: i.quantity })),
+          buyer_token: getBuyerToken(),
+          items: items.map(i => ({ bike_id: i.bikeId, quantity: 1 })),
         })
 
         if (!res.client_secret) {
@@ -353,6 +401,11 @@ function PaymentStep({ items, form, shipping, subtotal, onBack, onSuccess }) {
         })
         setClientSecret(res.client_secret)
       } catch (err) {
+        // If the backend tagged the failure as a stale-cart item, prune that
+        // item from the cart so the user doesn't keep hitting the same wall.
+        if ((err.code === 'item_unavailable' || err.code === 'item_sold') && err.data?.unavailable_bike_id) {
+          removeItem(err.data.unavailable_bike_id)
+        }
         setError(err.message || 'Failed to create order. Please try again.')
       } finally {
         setLoading(false)
@@ -445,7 +498,6 @@ export default function Checkout() {
   const items = useCartStore(s => s.items)
   const subtotal = useCartStore(selectSubtotal)
   const removeItem = useCartStore(s => s.removeItem)
-  const updateQty = useCartStore(s => s.updateQuantity)
   const clearCart = useCartStore(s => s.clearCart)
 
   const [step, setStep] = useState(0)
@@ -473,7 +525,6 @@ export default function Checkout() {
           <CartStep
             items={items}
             onRemove={removeItem}
-            onQty={updateQty}
             subtotal={subtotal}
             onNext={() => setStep(1)}
           />
