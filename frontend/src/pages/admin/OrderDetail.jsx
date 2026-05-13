@@ -151,7 +151,7 @@ export default function OrderDetail() {
                   {item.bike_id && <> · Bike #{item.bike_id}</>}
                 </div>
               </div>
-              <div className="font-semibold">{fmt(item.unit_price * item.quantity)}</div>
+              <div className="font-semibold">{fmt(item.unit_price)}</div>
             </div>
           ))}
         </div>

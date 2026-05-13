@@ -164,8 +164,8 @@ export default function OrderLookup() {
                 <p className="text-sm font-semibold text-gray-700">Items</p>
                 {order.items.map((item, i) => (
                   <div key={i} className="flex justify-between text-sm text-gray-700">
-                    <span>{item.bike_name || 'Bike'} × {item.quantity}</span>
-                    <span className="font-medium">${parseFloat(item.unit_price * item.quantity).toFixed(2)}</span>
+                    <span>{item.bike_name || 'Bike'}</span>
+                    <span className="font-medium">${parseFloat(item.unit_price).toFixed(2)}</span>
                   </div>
                 ))}
               </div>
