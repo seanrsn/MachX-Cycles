@@ -195,6 +195,7 @@ def _build_head(bike):
 
 import urllib.request
 import urllib.error
+import urllib.parse
 from html import escape as html_escape
 
 RESEND_FROM = 'MachX Cycles <hello@machxcycles.com>'
@@ -319,7 +320,13 @@ def _send_shipped_email(payload):
         req = urllib.request.Request(
             'https://api.resend.com/emails',
             data=payload_json,
-            headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type':  'application/json',
+                # Cloudflare in front of api.resend.com blocks urllib's default
+                # absent UA with HTTP 403 + error 1010. A real UA passes through.
+                'User-Agent':    'machx-cycles-lambda/1.0 (+hello@machxcycles.com)',
+            },
             method='POST',
         )
         try:
@@ -333,6 +340,205 @@ def _send_shipped_email(payload):
         return {'ok': True, 'action': 'shipped_email_sent'}
     except Exception as e:
         print(f"[shipped-email] crashed: {e}")
+        return {'ok': False, 'reason': 'crash'}
+
+
+_TWILIO_CREDS = None
+
+def _get_twilio_creds():
+    global _TWILIO_CREDS
+    if _TWILIO_CREDS is None:
+        try:
+            sm = boto3.client('secretsmanager', region_name='us-east-1')
+            resp = sm.get_secret_value(SecretId='twilio-credentials')
+            _TWILIO_CREDS = json.loads(resp['SecretString'])
+        except Exception as e:
+            print(f"[admin-sms] cannot fetch Twilio creds: {e}")
+            return None
+    return _TWILIO_CREDS
+
+
+def _send_admin_sms(payload):
+    """Send an SMS to the admin via Twilio REST API. Payload:
+       { 'action': 'send_admin_sms', 'message': 'NEW ORDER ...', 'to': '+1...' }
+    """
+    try:
+        message = payload.get('message') or ''
+        to_phone = payload.get('to') or os.environ.get('NOTIFY_PHONE') or ''
+        if not message or not to_phone:
+            print(f"[admin-sms] skip: missing message/to (to={to_phone!r})")
+            return {'ok': False, 'reason': 'missing_fields'}
+
+        creds = _get_twilio_creds()
+        if not creds:
+            return {'ok': False, 'reason': 'no_twilio_creds'}
+
+        sid   = creds.get('account_sid')
+        token = creds.get('auth_token')
+        frm   = creds.get('from_number')
+        if not all([sid, token, frm]):
+            print(f"[admin-sms] incomplete creds")
+            return {'ok': False, 'reason': 'incomplete_creds'}
+
+        import base64
+        auth = base64.b64encode(f'{sid}:{token}'.encode()).decode()
+        url  = f'https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json'
+        data = urllib.parse.urlencode({'From': frm, 'To': to_phone, 'Body': message}).encode()
+        req  = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                'Authorization': f'Basic {auth}',
+                'Content-Type':  'application/x-www-form-urlencoded',
+            },
+            method='POST',
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                body = r.read().decode('utf-8')
+            print(f"[admin-sms] sent to {to_phone}: {body[:200]}")
+            return {'ok': True, 'action': 'admin_sms_sent'}
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode('utf-8', errors='ignore')[:300]
+            print(f"[admin-sms] HTTP {e.code}: {err_body}")
+            return {'ok': False, 'reason': f'http_{e.code}'}
+    except Exception as e:
+        print(f"[admin-sms] crashed: {e}")
+        return {'ok': False, 'reason': 'crash'}
+
+
+def _send_order_confirmation_email(payload):
+    """Send the customer order-confirmation email via Resend. Payload contains
+    {action, order:{order_number,customer_name,customer_email,total,...},
+     items:[{bike_name,quantity,unit_price},...], addr:{line1,city,state,zip}}.
+    All data is pre-computed by the caller (stripe-webhook) since this Lambda
+    can't reach the in-VPC RDS."""
+    try:
+        order = payload.get('order') or {}
+        items = payload.get('items') or []
+        addr  = payload.get('addr') or None
+
+        to_email = (order.get('customer_email') or '').strip()
+        if not to_email:
+            return {'ok': False, 'reason': 'no_email'}
+
+        api_key = _get_resend_key()
+        if not api_key:
+            return {'ok': False, 'reason': 'no_resend_key'}
+
+        order_number = order.get('order_number') or ''
+        total        = float(order.get('total') or 0)
+        customer     = order.get('customer_name') or 'there'
+
+        items_html = ''.join(
+            f'<li style="margin:6px 0;">{html_escape(it["bike_name"])}'
+            + (f' &times; {it["quantity"]}' if it.get("quantity", 1) > 1 else '')
+            + '</li>'
+            for it in items
+        )
+        addr_html = ''
+        if addr:
+            line2 = addr.get('line2') or ''
+            addr_html = (
+                f'<p style="margin:0;color:#374151;">{html_escape(addr.get("line1", ""))}<br>'
+                + (f'{html_escape(line2)}<br>' if line2 else '')
+                + f'{html_escape(addr.get("city", ""))}, {html_escape(addr.get("state", ""))} {html_escape(addr.get("zip", ""))}</p>'
+            )
+
+        track_url = 'https://machxcycles.com/track-order'
+
+        html_body = f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;padding:24px 0;">
+    <tr><td align="center">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+        <tr><td style="background:linear-gradient(135deg,#ec4899 0%,#f97316 100%);padding:28px 32px;text-align:center;">
+          <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.01em;">MachX Cycles</h1>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <h2 style="margin:0 0 8px 0;font-size:20px;font-weight:700;color:#111827;">Thanks for your order, {html_escape(customer.split()[0] if customer else 'there')}!</h2>
+          <p style="margin:0 0 20px 0;color:#6b7280;font-size:14px;">We've received your payment and your bike is being prepped.</p>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:8px;padding:16px;margin:0 0 20px 0;">
+            <tr><td>
+              <p style="margin:0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Order number</p>
+              <p style="margin:4px 0 12px 0;color:#111827;font-size:18px;font-weight:700;font-family:'SF Mono',Menlo,monospace;">{html_escape(order_number)}</p>
+              <p style="margin:0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Total</p>
+              <p style="margin:4px 0 0 0;color:#111827;font-size:18px;font-weight:700;">${total:.2f}</p>
+            </td></tr>
+          </table>
+          {('<h3 style="margin:0 0 8px 0;font-size:14px;font-weight:600;color:#111827;text-transform:uppercase;letter-spacing:0.05em;">Items</h3><ul style="margin:0 0 20px 0;padding-left:20px;color:#374151;font-size:15px;">' + items_html + '</ul>') if items_html else ''}
+          {('<h3 style="margin:0 0 8px 0;font-size:14px;font-weight:600;color:#111827;text-transform:uppercase;letter-spacing:0.05em;">Ships to</h3>' + addr_html) if addr_html else ''}
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 16px 0;">
+            <tr><td align="center">
+              <a href="{track_url}" style="display:inline-block;background:linear-gradient(135deg,#ec4899 0%,#f97316 100%);color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:600;font-size:15px;">Track your order &rarr;</a>
+            </td></tr>
+          </table>
+          <p style="margin:24px 0 0 0;color:#6b7280;font-size:13px;line-height:1.5;">Use your email and order number <strong style="color:#111827;font-family:'SF Mono',Menlo,monospace;">{html_escape(order_number)}</strong> at <a href="{track_url}" style="color:#ec4899;text-decoration:none;">machxcycles.com/track-order</a> to check status anytime.</p>
+        </td></tr>
+        <tr><td style="background:#f9fafb;padding:20px 32px;border-top:1px solid #e5e7eb;text-align:center;">
+          <p style="margin:0;color:#6b7280;font-size:13px;">Questions? Just reply to this email - we'll get back to you within a day.</p>
+          <p style="margin:8px 0 0 0;color:#9ca3af;font-size:12px;">MachX Cycles &middot; Brooklyn Bikery &middot; 3149 Emmons Ave, Brooklyn, NY 11235</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+
+        addr_text = ''
+        if addr:
+            addr_text = f"\n\nShips to:\n{addr.get('line1', '')}\n"
+            if addr.get('line2'):
+                addr_text += f"{addr['line2']}\n"
+            addr_text += f"{addr.get('city', '')}, {addr.get('state', '')} {addr.get('zip', '')}"
+        items_text = '\n'.join(
+            f"  - {it['bike_name']}" + (f" x{it['quantity']}" if it.get('quantity', 1) > 1 else '')
+            for it in items
+        ) or '  (no items)'
+        text_body = (
+            f"Thanks for your order, {customer.split()[0] if customer else 'there'}!\n\n"
+            f"Order number: {order_number}\n"
+            f"Total: ${total:.2f}\n\n"
+            f"Items:\n{items_text}"
+            f"{addr_text}\n\n"
+            f"Track at: {track_url} (use your email + order number)\n\n"
+            f"Questions? Reply to this email.\n\n"
+            f"- MachX Cycles\n"
+            f"3149 Emmons Ave, Brooklyn, NY 11235"
+        )
+
+        payload_json = json.dumps({
+            'from':     RESEND_FROM,
+            'to':       [to_email],
+            'subject':  f'Order confirmed - {order_number}',
+            'html':     html_body,
+            'text':     text_body,
+            'reply_to': 'hello@machxcycles.com',
+            'headers':  {'X-Entity-Ref-ID': order_number},
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.resend.com/emails',
+            data=payload_json,
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type':  'application/json',
+                # Cloudflare in front of api.resend.com blocks urllib's default
+                # absent UA with HTTP 403 + error 1010. A real UA passes through.
+                'User-Agent':    'machx-cycles-lambda/1.0 (+hello@machxcycles.com)',
+            },
+            method='POST',
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                body = r.read().decode('utf-8')
+            print(f"[order-email] sent for order {order_number}: {body[:200]}")
+            return {'ok': True, 'action': 'order_confirmation_email_sent'}
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode('utf-8', errors='ignore')[:300]
+            print(f"[order-email] HTTP {e.code} for order {order_number}: {err_body}")
+            return {'ok': False, 'reason': 'send_failed'}
+    except Exception as e:
+        print(f"[order-email] crashed: {e}")
         return {'ok': False, 'reason': 'crash'}
 
 
@@ -356,6 +562,10 @@ def _process_one(payload):
     action = payload.get('action', 'upsert')
     if action == 'send_shipped_email':
         return _send_shipped_email(payload)
+    if action == 'send_admin_sms':
+        return _send_admin_sms(payload)
+    if action == 'send_order_confirmation_email':
+        return _send_order_confirmation_email(payload)
     bike = payload.get('bike') or {}
     slug = bike.get('slug')
     if not slug:

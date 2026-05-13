@@ -12,9 +12,8 @@ import base64
 import json
 import logging
 import os
-import urllib.request
-import urllib.error
-from html import escape as html_escape
+import secrets
+import time
 
 import boto3
 
@@ -27,10 +26,17 @@ logger.setLevel(logging.INFO)
 
 # ── Secrets (lazy-loaded) ─────────────────────────────────────────────────────
 _stripe_keys = None
-_twilio_creds = None
 
 # Phone number to notify on new orders (can also be env var)
 NOTIFY_PHONE = os.environ.get('NOTIFY_PHONE', '+19177530685')
+
+# S3 queue for outbound notifications (SMS + customer emails). This Lambda
+# runs INSIDE the VPC (for RDS access) and the VPC has no NAT, so we can't
+# reach api.twilio.com or api.resend.com directly. We drop a trigger JSON
+# in s3://machx-cycles-frontend/regen-queue/ and an S3 ObjectCreated event
+# fires the non-VPC sibling Lambda (machx-bike-html-regen) which actually
+# makes the outbound API calls. Same pattern as admin-api's shipped-email.
+NOTIFY_QUEUE_BUCKET = os.environ.get('NOTIFY_QUEUE_BUCKET', 'machx-cycles-frontend')
 
 
 def _get_stripe_keys():
@@ -43,41 +49,26 @@ def _get_stripe_keys():
     return _stripe_keys
 
 
-def _get_twilio_creds():
-    global _twilio_creds
-    if _twilio_creds is not None:
-        return _twilio_creds
-    client = boto3.client('secretsmanager', region_name=AWS_REGION)
-    resp   = client.get_secret_value(SecretId='twilio-credentials')
-    _twilio_creds = json.loads(resp['SecretString'])
-    return _twilio_creds
-
-
 def _send_sms(message: str):
-    """Send SMS via Twilio."""
+    """Queue an SMS-to-admin via S3 → bike_html_regen sibling Lambda.
+    Best-effort: never raises. The webhook returns 200 even if queueing fails."""
     try:
-        creds = _get_twilio_creds()
-        account_sid = creds.get('account_sid')
-        auth_token  = creds.get('auth_token')
-        from_number = creds.get('from_number')
-
-        if not all([account_sid, auth_token, from_number]):
-            logger.warning("Twilio credentials incomplete — skipping SMS")
-            return
-
-        from twilio.rest import Client
-        client = Client(account_sid, auth_token)
-        
-        client.messages.create(
-            body=message,
-            from_=from_number,
-            to=NOTIFY_PHONE
+        s3 = boto3.client('s3', region_name=AWS_REGION)
+        key = f"regen-queue/sms-{int(time.time() * 1000)}-{secrets.token_hex(3)}.json"
+        s3.put_object(
+            Bucket=NOTIFY_QUEUE_BUCKET,
+            Key=key,
+            Body=json.dumps({
+                'action':  'send_admin_sms',
+                'message': message,
+                'to':      NOTIFY_PHONE,
+            }).encode('utf-8'),
+            ContentType='application/json',
         )
-        logger.info(f"SMS sent to {NOTIFY_PHONE}")
-
+        logger.info(f"Queued admin SMS via {key}")
     except Exception as e:
-        logger.error(f"Failed to send SMS: {e}")
-        # Don't raise — SMS failure shouldn't break the webhook
+        # Twilio/Resend failures shouldn't break the webhook either way
+        logger.error(f"Failed to queue SMS: {e}")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -522,162 +513,57 @@ def _handle_payment_succeeded(pi, secret_key):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CUSTOMER EMAIL (via Resend) — sends a branded order-confirmation email.
-# Stripe ALSO sends a receipt automatically (we set receipt_email on the PI),
-# so this is the on-brand companion email with delivery info + tracking link.
-# Best-effort: never raises into the caller. Webhook returns 200 even if
-# email send fails — Stripe receipt is the safety net.
+# CUSTOMER ORDER-CONFIRMATION EMAIL — queued via S3 to the non-VPC sibling
+# Lambda (machx-bike-html-regen). We can't call Resend directly from inside
+# the VPC. Stripe ALSO sends an automatic receipt (receipt_email on the PI),
+# so this branded email is companion to that, not the safety net.
+# Best-effort: never raises into the caller.
 # ─────────────────────────────────────────────────────────────────────────────
 
-_RESEND_KEY  = None
-_RESEND_FROM = 'MachX Cycles <hello@machxcycles.com>'
-
-def _resend_creds():
-    """Pull the Resend API key from Secrets Manager once per warm Lambda."""
-    global _RESEND_KEY
-    if _RESEND_KEY is None:
-        try:
-            sm = boto3.client('secretsmanager', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
-            resp = sm.get_secret_value(SecretId='machx-resend-key')
-            _RESEND_KEY = json.loads(resp['SecretString'])['api_key']
-        except Exception as e:
-            logger.error(f"_resend_creds: failed to fetch key: {e}")
-            return None
-    return _RESEND_KEY
-
-
 def _send_customer_order_email(order: dict, addr: dict | None) -> None:
-    """Send the order-confirmation email to the customer. Best-effort."""
+    """Queue the branded order-confirmation email. The non-VPC sibling Lambda
+    picks up the S3 trigger and actually calls Resend."""
     try:
-        api_key = _resend_creds()
-        if not api_key:
-            logger.warning("_send_customer_order_email: no Resend key, skipping")
-            return
-
-        to_email = (order.get('customer_email') or '').strip()
-        if not to_email:
-            logger.info("_send_customer_order_email: no customer_email, skipping")
-            return
-
-        order_number = order['order_number']
-        total        = float(order['total'])
-        customer     = order.get('customer_name') or 'there'
-        items        = order.get('items') or []
-
-        # HTML body — keep simple, mobile-friendly, single-column.
-        items_html = ''.join(
-            f'<li style="margin:6px 0;">{html_escape(it["bike_name"])}'
-            + (f' &times; {it["quantity"]}' if it.get("quantity", 1) > 1 else '')
-            + '</li>'
-            for it in items
-        )
-        addr_html = ''
+        # Slim down the order payload — bike_html_regen only needs these fields
+        slim_order = {
+            'order_number':   order.get('order_number'),
+            'customer_name':  order.get('customer_name'),
+            'customer_email': order.get('customer_email'),
+            'total':          float(order.get('total') or 0),
+        }
+        slim_items = [
+            {
+                'bike_name': it.get('bike_name') or 'Bike',
+                'quantity':  int(it.get('quantity', 1)),
+            }
+            for it in (order.get('items') or [])
+        ]
+        slim_addr = None
         if addr:
-            line2 = addr.get('line2') or ''
-            addr_html = (
-                f'<p style="margin:0;color:#374151;">{html_escape(addr.get("line1", ""))}<br>'
-                + (f'{html_escape(line2)}<br>' if line2 else '')
-                + f'{html_escape(addr.get("city", ""))}, {html_escape(addr.get("state", ""))} {html_escape(addr.get("zip", ""))}</p>'
-            )
+            slim_addr = {
+                'line1': addr.get('line1', ''),
+                'line2': addr.get('line2', ''),
+                'city':  addr.get('city', ''),
+                'state': addr.get('state', ''),
+                'zip':   addr.get('zip', ''),
+            }
 
-        track_url = f'https://machxcycles.com/track-order'
-
-        html_body = f"""<!DOCTYPE html>
-<html><body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;padding:24px 0;">
-    <tr><td align="center">
-      <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
-        <tr><td style="background:linear-gradient(135deg,#ec4899 0%,#f97316 100%);padding:28px 32px;text-align:center;">
-          <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.01em;">MachX Cycles</h1>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <h2 style="margin:0 0 8px 0;font-size:20px;font-weight:700;color:#111827;">Thanks for your order, {html_escape(customer.split()[0] if customer else 'there')}!</h2>
-          <p style="margin:0 0 20px 0;color:#6b7280;font-size:14px;">We've received your payment and your bike is being prepped.</p>
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:8px;padding:16px;margin:0 0 20px 0;">
-            <tr><td>
-              <p style="margin:0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Order number</p>
-              <p style="margin:4px 0 12px 0;color:#111827;font-size:18px;font-weight:700;font-family:'SF Mono',Menlo,monospace;">{order_number}</p>
-              <p style="margin:0;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">Total</p>
-              <p style="margin:4px 0 0 0;color:#111827;font-size:18px;font-weight:700;">${total:.2f}</p>
-            </td></tr>
-          </table>
-          {('<h3 style="margin:0 0 8px 0;font-size:14px;font-weight:600;color:#111827;text-transform:uppercase;letter-spacing:0.05em;">Items</h3><ul style="margin:0 0 20px 0;padding-left:20px;color:#374151;font-size:15px;">' + items_html + '</ul>') if items_html else ''}
-          {('<h3 style="margin:0 0 8px 0;font-size:14px;font-weight:600;color:#111827;text-transform:uppercase;letter-spacing:0.05em;">Ships to</h3>' + addr_html) if addr_html else ''}
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 16px 0;">
-            <tr><td align="center">
-              <a href="{track_url}" style="display:inline-block;background:linear-gradient(135deg,#ec4899 0%,#f97316 100%);color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:600;font-size:15px;">Track your order &rarr;</a>
-            </td></tr>
-          </table>
-          <p style="margin:24px 0 0 0;color:#6b7280;font-size:13px;line-height:1.5;">Use your email and order number <strong style="color:#111827;font-family:'SF Mono',Menlo,monospace;">{order_number}</strong> at <a href="{track_url}" style="color:#ec4899;text-decoration:none;">machxcycles.com/track-order</a> to check status anytime.</p>
-        </td></tr>
-        <tr><td style="background:#f9fafb;padding:20px 32px;border-top:1px solid #e5e7eb;text-align:center;">
-          <p style="margin:0;color:#6b7280;font-size:13px;">Questions? Just reply to this email — we'll get back to you within a day.</p>
-          <p style="margin:8px 0 0 0;color:#9ca3af;font-size:12px;">MachX Cycles &middot; Brooklyn Bikery &middot; 3149 Emmons Ave, Brooklyn, NY 11235</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body></html>"""
-
-        # Plain-text fallback for clients that block HTML
-        addr_text = ''
-        if addr:
-            addr_text = f"\n\nShips to:\n{addr.get('line1', '')}\n"
-            if addr.get('line2'):
-                addr_text += f"{addr['line2']}\n"
-            addr_text += f"{addr.get('city', '')}, {addr.get('state', '')} {addr.get('zip', '')}"
-        items_text = '\n'.join(
-            f"  - {it['bike_name']}" + (f" x{it['quantity']}" if it.get('quantity', 1) > 1 else '')
-            for it in items
-        ) or '  (no items)'
-        text_body = (
-            f"Thanks for your order, {customer.split()[0] if customer else 'there'}!\n\n"
-            f"Order number: {order_number}\n"
-            f"Total: ${total:.2f}\n\n"
-            f"Items:\n{items_text}"
-            f"{addr_text}\n\n"
-            f"Track at: {track_url} (use your email + order number)\n\n"
-            f"Questions? Reply to this email.\n\n"
-            f"— MachX Cycles\n"
-            f"3149 Emmons Ave, Brooklyn, NY 11235"
+        s3 = boto3.client('s3', region_name=AWS_REGION)
+        key = f"regen-queue/email-order-{slim_order['order_number']}-{int(time.time() * 1000)}.json"
+        s3.put_object(
+            Bucket=NOTIFY_QUEUE_BUCKET,
+            Key=key,
+            Body=json.dumps({
+                'action': 'send_order_confirmation_email',
+                'order':  slim_order,
+                'items':  slim_items,
+                'addr':   slim_addr,
+            }).encode('utf-8'),
+            ContentType='application/json',
         )
-
-        payload = json.dumps({
-            'from':    _RESEND_FROM,
-            'to':      [to_email],
-            # Subject uses ASCII hyphen (not em-dash) so headers stay 7-bit
-            # clean and don't need MIME-encoding. Body is UTF-8 and fine.
-            'subject': f'Order confirmed - {order_number}',
-            'html':    html_body,
-            'text':    text_body,
-            'reply_to': 'hello@machxcycles.com',
-            'headers': {
-                # Helps recipients' mail clients thread future order updates
-                'X-Entity-Ref-ID': order_number,
-            },
-        }).encode('utf-8')
-
-        req = urllib.request.Request(
-            'https://api.resend.com/emails',
-            data=payload,
-            headers={
-                'Authorization': f'Bearer {api_key}',
-                'Content-Type':  'application/json',
-            },
-            method='POST',
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=10) as r:
-                body = r.read().decode('utf-8')
-            logger.info(f"Resend OK for order {order_number}: {body[:200]}")
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode('utf-8', errors='ignore')[:300]
-            logger.error(f"Resend HTTP {e.code} for order {order_number}: {err_body}")
-        except Exception as e:
-            logger.error(f"Resend send failed for order {order_number}: {e}")
+        logger.info(f"Queued order-confirmation email for {slim_order['order_number']} via {key}")
     except Exception as e:
-        # Belt-and-suspenders: never let an email-send error kill the webhook
-        logger.error(f"_send_customer_order_email crashed: {e}")
+        logger.error(f"_send_customer_order_email queueing failed: {e}")
 
 
 def _refund_race_loser(pi_id: str, ref: dict, secret_key: str):

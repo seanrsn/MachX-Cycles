@@ -23,30 +23,39 @@ import uuid
 import datetime
 
 from shared.db import get_connection
-from shared.response import success, error  # noqa: F401 — kept for parity
+from shared.response import success, error, _Encoder  # noqa: F401 — kept for parity
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+
+def _jsonable(result):
+    """Strip datetime/Decimal/etc. from the result so Lambda's runtime
+    serializer (which doesn't know about our custom encoder) can marshal it
+    across the sync-invoke boundary to stripe-payment. Without this, any
+    raw datetime in the result triggers Runtime.MarshalError on the caller
+    side and they see a 502 instead of their lookup result."""
+    return json.loads(json.dumps(result, cls=_Encoder))
 
 
 def handler(event, context):
     action = event.get('action', 'create_session')
 
     if action == 'create_session':
-        return create_session(event)
+        return _jsonable(create_session(event))
     elif action == 'update_session_pi':
-        return update_session_pi(event)
+        return _jsonable(update_session_pi(event))
     elif action == 'lookup_order':
-        return lookup_order(event)
+        return _jsonable(lookup_order(event))
     # Backwards compat: stripe-payment may still send the old names during
     # rollout. Map them to the new ones.
     elif action == 'create_order':
-        return create_session(event)
+        return _jsonable(create_session(event))
     elif action == 'update_payment_intent':
-        return update_session_pi({
+        return _jsonable(update_session_pi({
             **event,
             'session_id': event.get('order_id') or event.get('session_id'),
-        })
+        }))
     else:
         return {'error': f'Unknown action: {action}'}
 
