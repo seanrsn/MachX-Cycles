@@ -13,6 +13,31 @@ const CARRIER_LABELS = {
 }
 import Navbar from '../../components/store/Navbar'
 
+// Friendly labels + (optional) helper text per event type, so the customer
+// timeline reads like a story instead of a raw enum dump.
+const EVENT_LABEL = {
+  created:          'Order placed',
+  payment_received: 'Payment received',
+  shipped:          'Shipped',
+  delivered:        'Delivered',
+  cancelled:        'Cancelled',
+  refunded:         'Refunded',
+}
+
+function fmtEventTime(d) {
+  if (!d) return ''
+  const dt = new Date(d)
+  if (isNaN(dt)) return ''
+  const now    = Date.now()
+  const diffMs = now - dt.getTime()
+  if (diffMs >= 0 && diffMs < 60_000)        return 'Just now'
+  if (diffMs >= 0 && diffMs < 3600_000)      return `${Math.floor(diffMs / 60_000)} min ago`
+  return dt.toLocaleString('en-US', {
+    month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  })
+}
+
 const STATUS_COLOR = {
   pending: 'bg-yellow-100 text-yellow-800',
   confirmed: 'bg-blue-100 text-blue-800',
@@ -182,18 +207,22 @@ export default function OrderLookup() {
 
             {order.events?.length > 0 && (
               <div className="px-6 py-4 border-t border-gray-100">
-                <p className="text-sm font-semibold text-gray-700 mb-3">History</p>
-                <div className="space-y-2">
-                  {order.events.map((ev, i) => (
-                    <div key={i} className="flex items-start gap-3 text-sm">
-                      <div className="w-2 h-2 rounded-full bg-pink-600 mt-1.5 shrink-0" />
-                      <div>
-                        <p className="text-gray-900 capitalize font-medium">{ev.event_type?.replace(/_/g, ' ')}</p>
-                        {(ev.message || ev.notes) && <p className="text-gray-500">{ev.message || ev.notes}</p>}
-                        <p className="text-gray-400 text-xs">{new Date(ev.created_at).toLocaleString()}</p>
+                <p className="text-sm font-semibold text-gray-700 mb-3">Timeline</p>
+                <div className="space-y-3">
+                  {order.events.map((ev, i) => {
+                    const label = EVENT_LABEL[ev.event_type] || ev.event_type?.replace(/_/g, ' ')
+                    return (
+                      <div key={i} className="flex items-start gap-3 text-sm">
+                        <div className="w-2 h-2 rounded-full bg-pink-600 mt-1.5 shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <p className="text-gray-900 font-medium">{label}</p>
+                            <p className="text-gray-400 text-xs whitespace-nowrap">{fmtEventTime(ev.created_at)}</p>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )}

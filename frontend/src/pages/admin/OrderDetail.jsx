@@ -6,7 +6,24 @@ import { getOrder, updateOrder } from '../../api/admin'
 import { Badge, Button, Spinner } from '../../components/common'
 
 const fmt = n => `$${parseFloat(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`
-const fmtDate = d => d ? new Date(d).toLocaleString('en-US') : '—'
+const fmtDate = d => d ? new Date(d).toLocaleString('en-US', {
+  month: 'short', day: 'numeric', year: 'numeric',
+  hour: 'numeric', minute: '2-digit',
+}) : '—'
+
+// Pretty event-type labels for the admin audit log. Anything not in the map
+// falls back to the snake_cased raw type (still readable, just less polished).
+const EVENT_LABEL = {
+  created:                  'Order placed',
+  payment_received:         'Payment received',
+  'payment_intent.succeeded': 'Payment received',  // legacy rows
+  status_change:            'Status updated',
+  shipped:                  'Shipped',
+  delivered:                'Delivered',
+  cancelled:                'Cancelled',
+  refunded:                 'Refunded',
+  admin_release_reservation:'Reservation released',
+}
 
 const STATUS_OPTIONS  = ['pending','confirmed','processing','shipped','ready_for_pickup','completed','cancelled']
 const CARRIER_OPTIONS = [
@@ -235,16 +252,21 @@ export default function OrderDetail() {
       {order.events?.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h2 className="font-semibold text-gray-900 mb-4">Audit Log</h2>
-          <div className="space-y-3">
-            {order.events.map(ev => (
-              <div key={ev.id} className="text-sm flex gap-3">
-                <span className="text-gray-400 whitespace-nowrap">{fmtDate(ev.created_at)}</span>
-                <div>
-                  <span className="font-medium text-gray-700">{ev.event_type}</span>
-                  {ev.message && <span className="text-gray-500"> — {ev.message}</span>}
+          <div className="space-y-2.5">
+            {order.events.map(ev => {
+              const label = EVENT_LABEL[ev.event_type] || ev.event_type?.replace(/[._]/g, ' ')
+              // Hide the message when it's just a restatement of the label
+              const showMsg = ev.message && ev.message.trim().toLowerCase() !== label.toLowerCase()
+              return (
+                <div key={ev.id} className="text-sm flex items-baseline gap-3">
+                  <span className="text-gray-400 text-xs whitespace-nowrap tabular-nums w-32 shrink-0">{fmtDate(ev.created_at)}</span>
+                  <div className="min-w-0 flex-1">
+                    <span className="font-medium text-gray-700">{label}</span>
+                    {showMsg && <span className="text-gray-500"> — {ev.message}</span>}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}

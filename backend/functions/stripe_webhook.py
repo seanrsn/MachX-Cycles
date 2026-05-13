@@ -417,14 +417,14 @@ def _handle_payment_succeeded(pi, secret_key):
                 cur.execute(
                     """
                     INSERT INTO order_events (order_id, event_type, message, metadata)
-                    VALUES (%s, 'created', 'Order materialized from checkout session on payment success', %s)
+                    VALUES (%s, 'created', 'Order placed', %s)
                     """,
                     (order_id, json.dumps({'session_id': session_id, 'payment_intent_id': pi_id}))
                 )
                 cur.execute(
                     """
                     INSERT INTO order_events (order_id, event_type, message, metadata)
-                    VALUES (%s, 'payment_intent.succeeded', 'Payment confirmed — order is processing', %s)
+                    VALUES (%s, 'payment_received', 'Payment received', %s)
                     """,
                     (order_id, json.dumps({'payment_intent_id': pi_id}))
                 )

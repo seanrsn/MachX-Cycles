@@ -39,7 +39,15 @@ class _Encoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
             return float(obj)
-        if isinstance(obj, (datetime, date)):
+        if isinstance(obj, datetime):
+            # MySQL returns naive datetimes; we always store UTC. Tag them
+            # with 'Z' so JS Date parses them as UTC and renders in the
+            # user's local timezone — without 'Z', browsers treat the
+            # string as local time and display a 4–8 hour offset.
+            if obj.tzinfo is None:
+                return obj.isoformat() + 'Z'
+            return obj.isoformat()
+        if isinstance(obj, date):
             return obj.isoformat()
         return super().default(obj)
 

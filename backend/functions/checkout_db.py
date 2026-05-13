@@ -434,13 +434,16 @@ def lookup_order(body):
             items = cur.fetchall()
 
             # Public-facing event timeline. Filter to types meaningful to the
-            # customer (skip internal ones like admin_release_reservation etc.)
+            # customer (skip internal ones like admin_release_reservation,
+            # raw status_change rows, etc.) The status badge already shows
+            # the current state — events should describe MILESTONES, not
+            # internal field changes.
             cur.execute(
                 """
                 SELECT event_type, message, created_at
                 FROM order_events
                 WHERE order_id = %s
-                  AND event_type IN ('created','status_change','shipped','payment_succeeded','delivered','cancelled')
+                  AND event_type IN ('created','payment_received','shipped','delivered','cancelled','refunded')
                 ORDER BY created_at ASC
                 """,
                 (order['id'],)

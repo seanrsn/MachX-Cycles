@@ -284,8 +284,46 @@ def _run_migrations():
                     continue
                 cur.execute(ddl)
                 applied.append(f"{table}.{column}")
+
+            # Data cleanups — idempotent because each WHERE only matches the
+            # OLD form. Once normalized, subsequent runs do nothing.
+            data_changes = []
+
+            cur.execute(
+                "UPDATE order_events SET message = 'Order placed' "
+                "WHERE message = 'Order materialized from checkout session on payment success'"
+            )
+            if cur.rowcount: data_changes.append(f"created→Order placed: {cur.rowcount}")
+
+            cur.execute(
+                "UPDATE order_events SET event_type = 'payment_received', message = 'Payment received' "
+                "WHERE event_type = 'payment_intent.succeeded'"
+            )
+            if cur.rowcount: data_changes.append(f"payment_intent.succeeded→payment_received: {cur.rowcount}")
+
+            # Strip "(tracking: XYZ)" suffix from old shipped messages — tracking
+            # number is shown in the dedicated card, not the timeline message.
+            cur.execute(
+                r"UPDATE order_events SET message = REGEXP_REPLACE(message, ' \\(tracking:[^)]*\\)$', '') "
+                "WHERE event_type = 'shipped' AND message LIKE 'Shipped via%(tracking:%)'"
+            )
+            if cur.rowcount: data_changes.append(f"shipped strip-tracking: {cur.rowcount}")
+
+            # Collapse "Status changed from X to shipped" entries that duplicate
+            # an adjacent shipped event.
+            cur.execute("""
+                DELETE sc FROM order_events sc
+                INNER JOIN order_events sh
+                  ON sh.order_id = sc.order_id
+                 AND sh.event_type = 'shipped'
+                 AND ABS(TIMESTAMPDIFF(SECOND, sh.created_at, sc.created_at)) < 60
+                WHERE sc.event_type = 'status_change'
+                  AND sc.message LIKE '%to shipped%'
+            """)
+            if cur.rowcount: data_changes.append(f"deduped status_change/shipped: {cur.rowcount}")
+
         conn.commit()
-        return success({'applied': applied, 'skipped': skipped})
+        return success({'applied': applied, 'skipped': skipped, 'data_cleanups': data_changes})
     except Exception as e:
         conn.rollback()
         print(f"_run_migrations error: {e}")
@@ -1136,6 +1174,10 @@ def get_order(order_id: int):
 
 
 _VALID_CARRIERS = {'BIKEFLIGHTS', 'UPS', 'FEDEX', 'USPS', 'OTHER'}
+_CARRIER_LABELS = {'BIKEFLIGHTS': 'BikeFlights', 'UPS': 'UPS', 'FEDEX': 'FedEx', 'USPS': 'USPS', 'OTHER': 'carrier'}
+
+def _carrier_label(code: str) -> str:
+    return _CARRIER_LABELS.get((code or '').upper(), code or 'carrier')
 
 
 def update_order(order_id: int, event):
@@ -1191,7 +1233,8 @@ def update_order(order_id: int, event):
                     set_parts.append("`shipped_at` = UTC_TIMESTAMP()")
                     if existing.get('status') in (None, 'pending', 'confirmed', 'processing'):
                         set_parts.append("`status` = 'shipped'")
-                    shipping_event_msg = f"Shipped via {tc} (tracking: {tn})"
+                    # Tracking number is shown in its own UI card; no need to repeat in the message
+                    shipping_event_msg = f"Shipped via {_carrier_label(tc)}"
 
             if not set_parts:
                 return error('No valid fields to update', status=400)
@@ -1202,12 +1245,16 @@ def update_order(order_id: int, event):
                 args
             )
 
-            # Log status change event
+            # Log status change event — but skip when a more specific event
+            # (shipped) is also being logged in the same call. Avoids the
+            # noisy "Status changed from confirmed to shipped" + "Shipped via UPS"
+            # double entry that adds nothing for the customer or admin.
             if 'status' in body and body['status'] != existing['status']:
-                _log_order_event(
-                    cur, order_id, 'status_change',
-                    f"Status changed from {existing['status']} to {body['status']}"
-                )
+                if not (shipping_event_msg and body['status'] == 'shipped'):
+                    _log_order_event(
+                        cur, order_id, 'status_change',
+                        f"Marked {body['status']}"
+                    )
 
             if shipping_event_msg:
                 _log_order_event(cur, order_id, 'shipped', shipping_event_msg)
