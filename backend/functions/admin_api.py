@@ -327,6 +327,22 @@ def _run_migrations():
             """)
             if cur.rowcount: data_changes.append(f"deduped status_change/shipped: {cur.rowcount}")
 
+            # Clear stuck reservations on bikes that admin un-sold but whose
+            # reservation_state never got reset. Pre-fix, the only way out was
+            # to manually call /admin/bikes/{id}/release-reservation. Post-fix,
+            # update_bike does this automatically — this catches any rows
+            # already stuck.
+            cur.execute("""
+                UPDATE bikes
+                SET reservation_state = 'none',
+                    reserved_until = NULL,
+                    reservation_session_id = NULL
+                WHERE sold = 0
+                  AND reservation_state IN ('sold','soft','pi_created','processing')
+                  AND (reserved_until IS NULL OR reserved_until < UTC_TIMESTAMP())
+            """)
+            if cur.rowcount: data_changes.append(f"unstuck bike reservations: {cur.rowcount}")
+
         conn.commit()
         return success({'applied': applied, 'skipped': skipped, 'data_cleanups': data_changes})
     except Exception as e:
@@ -762,6 +778,19 @@ def update_bike(bike_id: int, event):
                     specs = json.dumps(specs)
                 set_parts.append("`specs` = %s")
                 args.append(specs)
+
+            # If admin is making the bike buyable again (un-selling it OR
+            # re-activating it), clear any leftover reservation state from
+            # a previous checkout. The webhook sets reservation_state='sold'
+            # on a successful sale; without this reset, that lock persists
+            # forever even after admin flips sold→0, and new buyers get
+            # "was just reserved by another shopper" with no visible cause.
+            unsold       = body.get('sold')      in (0, False, '0', 'false')
+            reactivating = body.get('is_active') in (1, True, '1', 'true')
+            if unsold or reactivating:
+                set_parts.append("`reservation_state` = 'none'")
+                set_parts.append("`reserved_until` = NULL")
+                set_parts.append("`reservation_session_id` = NULL")
 
             if not set_parts:
                 return error('No valid fields to update', status=400)
