@@ -513,12 +513,14 @@ export default function BikeForm() {
       qc.invalidateQueries({ queryKey: ['public-featured']})
       qc.invalidateQueries({ queryKey: ['related-bikes']  })
 
-      // Navigate immediately — no success card / setTimeout. Previously a
-      // 1200ms timer between setSuccess(true) and navigate() could leave
-      // users staring at "Redirecting to bikes list..." indefinitely if
-      // anything (chunk reload, React Query state, lazy chunk fail) blocked
-      // the timer callback. The destination itself is the success signal.
-      //
+      // Reset the saving spinner BEFORE navigate fires. If we leave it
+      // true and the route transition takes any time (lazy chunk fetch,
+      // Suspense, anything), the user sits with a frozen spinner button
+      // until they reload. Resetting now means: if navigate works → the
+      // page transitions and the spinner state is irrelevant; if navigate
+      // hangs → at least the button is interactive again.
+      setSaving(false)
+
       // For NEW bikes, jump into edit mode for the just-created bike so
       // the user can immediately upload photos/videos (the media manager
       // is disabled before save because images need a bike_id to attach
