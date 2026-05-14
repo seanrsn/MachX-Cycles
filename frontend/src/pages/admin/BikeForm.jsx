@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, Save, Upload, X, Film, ImageIcon, CheckCircle, Bike, GripVertical, AlertTriangle, Clock } from 'lucide-react'
+import { Plus, Trash2, Save, Upload, X, Film, ImageIcon, Bike, GripVertical, AlertTriangle, Clock } from 'lucide-react'
 import {
   getBike, createBike, updateBike, releaseBikeReservation,
   getUploadUrl, deleteImage, reorderImages,
@@ -430,7 +430,7 @@ export default function BikeForm() {
   const [form, setForm] = useState({
     name: '', category_id: 1, description: '', base_price: '', msrp: '',
     brand: '', material: '', frame_size: '', condition_grade: '',
-    model_year: new Date().getFullYear(),
+    model_year: '',
     featured: false, sold: false,
   })
   // Track whether the admin picked "Other" so we can show a free-text field.
@@ -438,7 +438,6 @@ export default function BikeForm() {
   // free-text mode so the value remains editable.
   const [brandIsOther, setBrandIsOther] = useState(false)
   const [saving, setSaving]     = useState(false)
-  const [success, setSuccess]   = useState(false)
   const [error, setError]       = useState('')
 
   const { data: bikeData, isLoading } = useQuery({
@@ -465,7 +464,7 @@ export default function BikeForm() {
       material:        bikeData.material        || '',
       frame_size:      bikeData.frame_size      || '',
       condition_grade: bikeData.condition_grade || '',
-      model_year:      bikeData.model_year      || new Date().getFullYear(),
+      model_year:      bikeData.model_year      || '',
       featured:        !!bikeData.featured,
       sold:            !!bikeData.sold,
     })
@@ -488,7 +487,8 @@ export default function BikeForm() {
         base_price:      parseFloat(form.base_price),
         msrp:            form.msrp ? parseFloat(form.msrp) : null,
         category_id:     parseInt(form.category_id),
-        model_year:      parseInt(form.model_year),
+        // Empty string → null (NaN would 500 the backend; the column is nullable).
+        model_year:      form.model_year ? parseInt(form.model_year) : null,
         brand:           (form.brand || '').trim() || null,
         frame_size:      form.frame_size || null,
         condition_grade: form.condition_grade || null,
@@ -513,21 +513,23 @@ export default function BikeForm() {
       qc.invalidateQueries({ queryKey: ['public-featured']})
       qc.invalidateQueries({ queryKey: ['related-bikes']  })
 
-      // Show success state then redirect
-      setSuccess(true)
-      setTimeout(() => {
-        // For NEW bikes, jump into edit mode for the just-created bike so
-        // the user can immediately upload photos/videos (the media manager
-        // is disabled before save because images need a bike_id to attach
-        // to). For EDIT, back to the list — they're done.
-        if (!isEdit && bikeId) {
-          navigate(`/admin/bikes/${bikeId}/edit`, {
-            state: { justCreated: true },
-          })
-        } else {
-          navigate('/admin/bikes')
-        }
-      }, 1200)
+      // Navigate immediately — no success card / setTimeout. Previously a
+      // 1200ms timer between setSuccess(true) and navigate() could leave
+      // users staring at "Redirecting to bikes list..." indefinitely if
+      // anything (chunk reload, React Query state, lazy chunk fail) blocked
+      // the timer callback. The destination itself is the success signal.
+      //
+      // For NEW bikes, jump into edit mode for the just-created bike so
+      // the user can immediately upload photos/videos (the media manager
+      // is disabled before save because images need a bike_id to attach
+      // to). For EDIT, back to the list — they're done.
+      if (!isEdit && bikeId) {
+        navigate(`/admin/bikes/${bikeId}/edit`, {
+          state: { justCreated: true },
+        })
+      } else {
+        navigate('/admin/bikes', { state: { flashSaved: true } })
+      }
     } catch (err) {
       setError(err.message || 'Failed to save bike.')
       setSaving(false)
@@ -535,23 +537,6 @@ export default function BikeForm() {
   }
 
   if (isEdit && (isLoading || !bikeData)) return <div className="flex justify-center py-16"><Spinner /></div>
-
-  // Success overlay
-  if (success) {
-    return (
-      <div className="max-w-3xl">
-        <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <CheckCircle size={32} className="text-green-600" />
-          </div>
-          <h2 className="text-xl font-bold text-gray-900 mb-2">
-            {isEdit ? 'Bike Updated!' : 'Bike Created!'}
-          </h2>
-          <p className="text-gray-500">Redirecting to bikes list...</p>
-        </div>
-      </div>
-    )
-  }
 
   // Get cover image (first image)
   const coverImage = bikeData?.images?.[0]?.url

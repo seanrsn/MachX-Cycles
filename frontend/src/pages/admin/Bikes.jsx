@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
-import { Plus, Edit, Trash2, Search } from 'lucide-react'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { Plus, Edit, Trash2, Search, CheckCircle } from 'lucide-react'
 import { getBikes, deleteBike } from '../../api/admin'
 import { PageHeader, Badge, Spinner, Button, ConfirmDialog } from '../../components/common'
 
@@ -11,7 +11,20 @@ export default function Bikes() {
   const [search, setSearch]     = useState('')
   const [confirm, setConfirm]   = useState(null) // { id, name }
   const navigate    = useNavigate()
+  const location    = useLocation()
   const qc          = useQueryClient()
+
+  // Flash banner shown briefly after a save in BikeForm. We replace the
+  // location state immediately so a refresh doesn't re-show it.
+  const [flashSaved, setFlashSaved] = useState(!!location.state?.flashSaved)
+  useEffect(() => {
+    if (location.state?.flashSaved) {
+      navigate(location.pathname, { replace: true, state: {} })
+      const t = setTimeout(() => setFlashSaved(false), 2400)
+      return () => clearTimeout(t)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-bikes', search],
@@ -35,6 +48,12 @@ export default function Bikes() {
           <Plus size={16} /> Add Bike
         </Button>
       </PageHeader>
+
+      {flashSaved && (
+        <div className="bg-green-50 border border-green-200 text-green-800 text-sm rounded-lg px-4 py-2.5 flex items-center gap-2">
+          <CheckCircle size={16} /> Bike saved.
+        </div>
+      )}
 
       {/* Search */}
       <div className="relative max-w-xs">
