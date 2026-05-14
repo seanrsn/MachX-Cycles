@@ -298,7 +298,8 @@ def _handle_payment_succeeded(pi, secret_key):
                 """
                 SELECT id, order_number, buyer_token, customer_name, customer_email,
                        customer_phone, shipping_address, shipping_rate_id, shipping_fee,
-                       subtotal, discount_amount, total, promo_code, items, status,
+                       subtotal, discount_amount, tax_amount, tax_calculation_id,
+                       total, promo_code, items, status,
                        converted_to_order_id
                 FROM checkout_sessions
                 WHERE stripe_payment_intent_id = %s
@@ -373,11 +374,13 @@ def _handle_payment_succeeded(pi, secret_key):
                     INSERT INTO orders
                         (order_number, customer_name, customer_email, customer_phone,
                          fulfillment_type, payment_type,
-                         shipping_address, shipping_fee, subtotal, discount_amount, total,
+                         shipping_address, shipping_fee, subtotal, discount_amount, tax, total,
+                         tax_calculation_id,
                          stripe_payment_intent_id, stripe_latest_charge_id,
                          payment_status, status, notes)
                     VALUES (%s, %s, %s, %s, 'ship', 'full',
-                            %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s, %s,
+                            %s,
                             %s, %s,
                             'paid', 'confirmed', NULL)
                     """,
@@ -390,7 +393,9 @@ def _handle_payment_succeeded(pi, secret_key):
                         session['shipping_fee'],
                         session['subtotal'],
                         session['discount_amount'],
+                        session.get('tax_amount') or 0,
                         session['total'],
+                        session.get('tax_calculation_id'),
                         pi_id,
                         pi.get('latest_charge'),
                     )
@@ -458,19 +463,22 @@ def _handle_payment_succeeded(pi, secret_key):
                         )
 
                 order_info = {
-                    'order_number':     order_number,
-                    'customer_name':    session['customer_name'],
-                    'customer_email':   session['customer_email'],
-                    'customer_phone':   session['customer_phone'],
-                    'total':            float(session['total']),
-                    'items':            [
+                    'order_number':       order_number,
+                    'order_id':           order_id,
+                    'customer_name':      session['customer_name'],
+                    'customer_email':     session['customer_email'],
+                    'customer_phone':     session['customer_phone'],
+                    'total':              float(session['total']),
+                    'tax':                float(session.get('tax_amount') or 0),
+                    'tax_calculation_id': session.get('tax_calculation_id'),
+                    'items':              [
                         {
                             'bike_name': it.get('bike_name', f"Bike #{it.get('bike_id')}"),
                             'quantity':  it.get('quantity', 1),
                         }
                         for it in items
                     ],
-                    'shipping_address': session['shipping_address'],
+                    'shipping_address':   session['shipping_address'],
                 }
 
         conn.commit()
@@ -510,6 +518,35 @@ def _handle_payment_succeeded(pi, secret_key):
 
         _send_sms(sms_message)
         _send_customer_order_email(order_info, addr)
+        _record_tax_transaction(order_info)
+
+
+def _record_tax_transaction(order: dict) -> None:
+    """Queue 'create Stripe Tax Transaction' job to S3. The non-VPC sibling
+    Lambda actually calls stripe.tax.Transaction.create_from_calculation(),
+    which is what makes Stripe Tax officially record this sale for state
+    reporting. Without this, the Calculation we did at PI-creation time is
+    just an estimate that never gets remitted in our Stripe Tax reports.
+    Best-effort: never raises."""
+    if not order.get('tax_calculation_id'):
+        return
+    try:
+        s3 = boto3.client('s3', region_name=AWS_REGION)
+        key = f"regen-queue/tax-tx-{order['order_number']}-{int(time.time() * 1000)}.json"
+        s3.put_object(
+            Bucket=NOTIFY_QUEUE_BUCKET,
+            Key=key,
+            Body=json.dumps({
+                'action':              'create_tax_transaction',
+                'tax_calculation_id':  order['tax_calculation_id'],
+                'order_number':        order['order_number'],
+                'order_id':            order.get('order_id'),
+            }).encode('utf-8'),
+            ContentType='application/json',
+        )
+        logger.info(f"Queued tax-transaction job for {order['order_number']} via {key}")
+    except Exception as e:
+        logger.error(f"_record_tax_transaction queueing failed: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

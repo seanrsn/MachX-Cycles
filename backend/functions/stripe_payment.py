@@ -136,40 +136,106 @@ def handle_checkout(event):
         else:
             return _error(db_result['error'], 500)
     
-    session_id   = db_result['session_id']
-    order_number = db_result['order_number']
-    total        = db_result['total']
+    session_id    = db_result['session_id']
+    order_number  = db_result['order_number']
+    pretax_total  = float(db_result['total'])  # subtotal - discount + shipping (no tax yet)
+    shipping_fee  = float(db_result.get('shipping_fee') or 0)
+    line_items_db = db_result.get('line_items') or []
 
-    logger.info(f"Session {session_id} created (order_number={order_number}), total: ${total}")
+    logger.info(f"Session {session_id} created (order_number={order_number}), pretax total: ${pretax_total}")
 
-    # Step 2: Create Stripe PaymentIntent
+    # Step 2: Calculate tax via Stripe Tax. We do this BEFORE creating the
+    # PaymentIntent so the PI amount includes tax — that way the customer
+    # is only ever charged once, and Stripe Radar/3DS sees the right total.
+    tax_amount         = 0.0
+    tax_calculation_id = None
+    final_total        = pretax_total
+
+    addr = body.get('shipping_address') or {}
+    if line_items_db and addr.get('postal_code') or addr.get('zip'):
+        try:
+            stripe = _get_stripe()
+            calc_line_items = [
+                {
+                    # Stripe wants amount in cents per line — total for that
+                    # line, not unit price. Each MachX bike is 1-of-1 so qty=1.
+                    'amount':       int(round(float(li['unit_price']) * int(li.get('quantity', 1)) * 100)),
+                    'reference':    f"bike-{li.get('bike_id')}",
+                    'tax_behavior': 'exclusive',
+                    # General tangible goods — matches the dashboard preset.
+                    # Could be specialized to a bicycle code per state later.
+                    'tax_code':     'txcd_99999999',
+                }
+                for li in line_items_db
+            ]
+            calc_kwargs = {
+                'currency':   'usd',
+                'line_items': calc_line_items,
+                'customer_details': {
+                    'address': {
+                        'line1':       addr.get('line1') or '',
+                        'line2':       addr.get('line2') or None,
+                        'city':        addr.get('city') or '',
+                        'state':       addr.get('state') or '',
+                        'postal_code': addr.get('zip') or addr.get('postal_code') or '',
+                        'country':     addr.get('country') or 'US',
+                    },
+                    'address_source': 'shipping',
+                },
+                'expand': ['line_items'],
+            }
+            if shipping_fee > 0:
+                calc_kwargs['shipping_cost'] = {'amount': int(round(shipping_fee * 100))}
+
+            calc = stripe.tax.Calculation.create(**calc_kwargs)
+            tax_amount         = round(calc.tax_amount_exclusive / 100, 2)
+            final_total        = round(calc.amount_total / 100, 2)
+            tax_calculation_id = calc.id
+            logger.info(f"Stripe Tax calc {calc.id}: tax=${tax_amount}, total=${final_total}")
+        except Exception:
+            # Don't break checkout if tax calc fails. Log loudly — we'd rather
+            # ship the bike with $0 tax than lose the sale, and we'll see the
+            # error in CloudWatch and patch it.
+            logger.exception(f"Stripe Tax calculation failed for session {session_id}; proceeding without tax")
+
+    # Persist tax + new total back to the session before creating the PI.
+    if tax_calculation_id or tax_amount > 0:
+        tax_persist = _invoke_checkout_db({
+            'action':              'update_session_tax',
+            'session_id':          session_id,
+            'tax_amount':          tax_amount,
+            'tax_calculation_id':  tax_calculation_id,
+            'total':               final_total,
+        })
+        if 'error' in tax_persist:
+            logger.warning(f"Failed to persist tax on session {session_id}: {tax_persist['error']}")
+
+    # Step 3: Create Stripe PaymentIntent with the tax-inclusive total
     client_secret = None
     try:
         stripe = _get_stripe()
-
-        # receipt_email tells Stripe to email the customer a receipt
-        # automatically when the charge succeeds. Includes the amount, last 4,
-        # and our business info — works without any custom email infra.
-        # Also makes the customer email visible in the Stripe Dashboard
-        # payments list (was previously empty since we only put it in metadata).
         customer_email = (body.get('customer_email') or '').strip()
+        pi_metadata = {
+            'session_id':     str(session_id),
+            'order_number':   order_number,
+            'customer_email': customer_email,
+        }
+        if tax_calculation_id:
+            pi_metadata['tax_calculation_id'] = tax_calculation_id
+
         pi = stripe.PaymentIntent.create(
-            amount=int(float(total) * 100),  # cents
+            amount=int(round(final_total * 100)),  # cents — includes tax
             currency='usd',
             automatic_payment_methods={'enabled': True},
             receipt_email=customer_email or None,
-            metadata={
-                'session_id':     str(session_id),
-                'order_number':   order_number,
-                'customer_email': customer_email,
-            },
+            metadata=pi_metadata,
             description=f'MachX Cycles – {order_number}',
         )
 
         client_secret = pi.client_secret
-        logger.info(f"PaymentIntent {pi.id} created for session {session_id}")
+        logger.info(f"PaymentIntent {pi.id} created for session {session_id} (amount=${final_total})")
 
-        # Step 3: Store PI id on the session + extend reservation to 10 min
+        # Step 4: Store PI id on the session + extend reservation to 10 min
         update_result = _invoke_checkout_db({
             'action': 'update_session_pi',
             'session_id': session_id,
@@ -178,19 +244,20 @@ def handle_checkout(event):
 
         if 'error' in update_result:
             logger.warning(f"Failed to store PI id: {update_result['error']}")
-            # Continue anyway — session exists, payment can still proceed
 
     except Exception as e:
         logger.exception(f"Stripe error for session {session_id}")
         return _error('Payment initialization failed. Please try again.', 500)
 
-    # Step 4: Return client_secret. Note: order_id intentionally not returned
-    # because no real order exists yet — only a session. Frontend uses the
-    # order_number for confirmation page lookups.
+    # Return the breakdown so the frontend can display tax as its own line.
     return _response({
         'session_id':    session_id,
         'order_number':  order_number,
-        'total':         total,
+        'subtotal':      float(db_result.get('subtotal') or 0),
+        'discount':      float(db_result.get('discount_amount') or 0),
+        'shipping_fee':  shipping_fee,
+        'tax':           tax_amount,
+        'total':         final_total,
         'client_secret': client_secret,
     }, 201)
 

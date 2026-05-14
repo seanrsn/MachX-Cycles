@@ -265,6 +265,11 @@ _PENDING_MIGRATIONS = [
     ("orders", "tracking_carrier",  "ALTER TABLE orders ADD COLUMN tracking_carrier VARCHAR(20) DEFAULT NULL"),
     ("orders", "shipped_at",        "ALTER TABLE orders ADD COLUMN shipped_at DATETIME DEFAULT NULL"),
     ("orders", "estimated_delivery","ALTER TABLE orders ADD COLUMN estimated_delivery DATE DEFAULT NULL"),
+    # 2026-05-13: Stripe Tax columns
+    ("checkout_sessions", "tax_amount",          "ALTER TABLE checkout_sessions ADD COLUMN tax_amount DECIMAL(10,2) DEFAULT 0"),
+    ("checkout_sessions", "tax_calculation_id",  "ALTER TABLE checkout_sessions ADD COLUMN tax_calculation_id VARCHAR(100) DEFAULT NULL"),
+    ("orders",            "tax_calculation_id",  "ALTER TABLE orders ADD COLUMN tax_calculation_id VARCHAR(100) DEFAULT NULL"),
+    ("orders",            "tax_transaction_id",  "ALTER TABLE orders ADD COLUMN tax_transaction_id VARCHAR(100) DEFAULT NULL"),
 ]
 
 

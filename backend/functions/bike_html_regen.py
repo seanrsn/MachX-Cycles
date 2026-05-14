@@ -542,6 +542,68 @@ def _send_order_confirmation_email(payload):
         return {'ok': False, 'reason': 'crash'}
 
 
+_STRIPE_KEY = None
+
+def _get_stripe_key():
+    global _STRIPE_KEY
+    if _STRIPE_KEY is None:
+        try:
+            sm = boto3.client('secretsmanager', region_name='us-east-1')
+            resp = sm.get_secret_value(SecretId='machx-stripe-keys')
+            _STRIPE_KEY = json.loads(resp['SecretString']).get('secret_key')
+        except Exception as e:
+            print(f"[tax-tx] cannot fetch Stripe key: {e}")
+            return None
+    return _STRIPE_KEY
+
+
+def _create_tax_transaction(payload):
+    """Call Stripe Tax Transaction API to officially record the sale for state
+    reporting. We do this AFTER payment_intent.succeeded — the calculation
+    was made at PI-creation time, the transaction makes it real in Stripe Tax.
+
+    Without this, Stripe Tax has no record of the sale and you'd undercollect
+    on state filings. With it, the sale shows up in Tax > Reports automatically."""
+    try:
+        calc_id      = payload.get('tax_calculation_id')
+        order_number = payload.get('order_number')
+        if not calc_id:
+            return {'ok': False, 'reason': 'no_calculation_id'}
+
+        api_key = _get_stripe_key()
+        if not api_key:
+            return {'ok': False, 'reason': 'no_stripe_key'}
+
+        # Plain REST call — we don't need the full stripe SDK for one endpoint
+        data = urllib.parse.urlencode({
+            'calculation': calc_id,
+            'reference':   order_number or calc_id,
+        }).encode()
+        req = urllib.request.Request(
+            'https://api.stripe.com/v1/tax/transactions/create_from_calculation',
+            data=data,
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type':  'application/x-www-form-urlencoded',
+                'User-Agent':    'machx-cycles-lambda/1.0',
+            },
+            method='POST',
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                body = json.loads(r.read().decode('utf-8'))
+            tx_id = body.get('id')
+            print(f"[tax-tx] recorded {tx_id} for order {order_number} (calc={calc_id})")
+            return {'ok': True, 'action': 'tax_transaction_created', 'transaction_id': tx_id}
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode('utf-8', errors='ignore')[:500]
+            print(f"[tax-tx] HTTP {e.code} for order {order_number}: {err_body}")
+            return {'ok': False, 'reason': f'http_{e.code}'}
+    except Exception as e:
+        print(f"[tax-tx] crashed: {e}")
+        return {'ok': False, 'reason': 'crash'}
+
+
 def _invalidate(slug):
     try:
         cf.create_invalidation(
@@ -566,6 +628,8 @@ def _process_one(payload):
         return _send_admin_sms(payload)
     if action == 'send_order_confirmation_email':
         return _send_order_confirmation_email(payload)
+    if action == 'create_tax_transaction':
+        return _create_tax_transaction(payload)
     bike = payload.get('bike') or {}
     slug = bike.get('slug')
     if not slug:

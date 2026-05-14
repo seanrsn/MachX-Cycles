@@ -171,8 +171,32 @@ export default function OrderLookup() {
               </div>
             )}
 
-            <div className="px-6 py-4 bg-gray-50 border-t border-gray-100">
-              <div className="flex justify-between font-bold text-gray-900">
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 space-y-1.5">
+              {order.subtotal != null && parseFloat(order.subtotal) > 0 && (
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>Subtotal</span>
+                  <span>${parseFloat(order.subtotal).toFixed(2)}</span>
+                </div>
+              )}
+              {order.discount_amount != null && parseFloat(order.discount_amount) > 0 && (
+                <div className="flex justify-between text-sm text-pink-600">
+                  <span>Discount</span>
+                  <span>-${parseFloat(order.discount_amount).toFixed(2)}</span>
+                </div>
+              )}
+              {order.shipping_fee != null && parseFloat(order.shipping_fee) > 0 && (
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>Shipping</span>
+                  <span>${parseFloat(order.shipping_fee).toFixed(2)}</span>
+                </div>
+              )}
+              {order.tax != null && parseFloat(order.tax) > 0 && (
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>Sales tax</span>
+                  <span>${parseFloat(order.tax).toFixed(2)}</span>
+                </div>
+              )}
+              <div className="flex justify-between font-bold text-gray-900 pt-1.5 border-t border-gray-200">
                 <span>Total</span>
                 <span>${parseFloat(order.total ?? order.total_amount ?? 0).toFixed(2)}</span>
               </div>

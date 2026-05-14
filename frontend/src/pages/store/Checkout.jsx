@@ -308,7 +308,34 @@ function PaymentForm({ orderInfo, onSuccess, onBack }) {
           <h3 className="font-semibold text-gray-900">Order Summary</h3>
           <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">Order #{orderInfo.order_number}</span>
         </div>
-        <div className="flex justify-between font-bold text-gray-900 text-lg border-t border-gray-100 pt-3">
+        {/* Show breakdown only if we have it from the backend */}
+        {orderInfo.subtotal != null && (
+          <div className="space-y-1 text-sm border-t border-gray-100 pt-3 mb-3">
+            <div className="flex justify-between text-gray-600">
+              <span>Subtotal</span>
+              <span>${parseFloat(orderInfo.subtotal).toFixed(2)}</span>
+            </div>
+            {orderInfo.discount > 0 && (
+              <div className="flex justify-between text-pink-600">
+                <span>Discount</span>
+                <span>-${parseFloat(orderInfo.discount).toFixed(2)}</span>
+              </div>
+            )}
+            {orderInfo.shipping_fee != null && (
+              <div className="flex justify-between text-gray-600">
+                <span>Shipping</span>
+                <span>${parseFloat(orderInfo.shipping_fee).toFixed(2)}</span>
+              </div>
+            )}
+            {orderInfo.tax > 0 && (
+              <div className="flex justify-between text-gray-600">
+                <span>Sales tax</span>
+                <span>${parseFloat(orderInfo.tax).toFixed(2)}</span>
+              </div>
+            )}
+          </div>
+        )}
+        <div className={`flex justify-between font-bold text-gray-900 text-lg ${orderInfo.subtotal != null ? 'border-t border-gray-100 pt-3' : 'border-t border-gray-100 pt-3'}`}>
           <span>Total</span>
           <span>${parseFloat(orderInfo.total).toFixed(2)}</span>
         </div>
@@ -401,7 +428,11 @@ function PaymentStep({ items, form, shipping, subtotal, onBack, onSuccess }) {
 
         setOrderInfo({
           order_number: res.order_number,
-          total: res.total,
+          subtotal:     res.subtotal,
+          discount:     res.discount,
+          shipping_fee: res.shipping_fee,
+          tax:          res.tax,
+          total:        res.total,
         })
         setClientSecret(res.client_secret)
       } catch (err) {

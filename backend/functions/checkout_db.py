@@ -45,6 +45,8 @@ def handler(event, context):
         return _jsonable(create_session(event))
     elif action == 'update_session_pi':
         return _jsonable(update_session_pi(event))
+    elif action == 'update_session_tax':
+        return _jsonable(update_session_tax(event))
     elif action == 'lookup_order':
         return _jsonable(lookup_order(event))
     # Backwards compat: stripe-payment may still send the old names during
@@ -323,6 +325,17 @@ def create_session(body):
             'subtotal':        round(subtotal, 2),
             'shipping_fee':    shipping_fee,
             'discount_amount': discount_amount,
+            # Pass back the per-bike line items so stripe-payment can build
+            # Stripe Tax line items with the actual prices each customer paid.
+            'line_items':      [
+                {
+                    'bike_id':    li.get('bike_id'),
+                    'bike_name':  li.get('bike_name'),
+                    'unit_price': float(li.get('unit_price') or 0),
+                    'quantity':   int(li.get('quantity') or 1),
+                }
+                for li in line_items
+            ],
         }
 
     except Exception as e:
@@ -370,6 +383,43 @@ def update_session_pi(body):
         return {'error': 'Internal error'}
 
 
+# ── update_session_tax ──────────────────────────────────────────────────────
+# Called by stripe-payment AFTER it gets the Stripe Tax calculation back.
+# Persists the tax amount + Stripe calculation_id on the session, and
+# refreshes the total to subtotal - discount + shipping + tax. The same
+# total then gets used for the PaymentIntent amount, and is what the
+# customer sees in the checkout summary.
+
+def update_session_tax(body):
+    session_id          = body.get('session_id')
+    tax_amount          = body.get('tax_amount')
+    tax_calculation_id  = body.get('tax_calculation_id')
+    new_total           = body.get('total')
+
+    if session_id is None or tax_amount is None or new_total is None:
+        return {'error': 'session_id, tax_amount, total required'}
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE checkout_sessions
+                SET tax_amount = %s,
+                    tax_calculation_id = %s,
+                    total = %s
+                WHERE id = %s AND status = 'active'
+                """,
+                (float(tax_amount), tax_calculation_id, float(new_total), session_id)
+            )
+        conn.commit()
+        return {'success': True}
+    except Exception:
+        conn.rollback()
+        logger.exception("DB error updating session tax")
+        return {'error': 'Internal error'}
+
+
 # ── lookup_order ─────────────────────────────────────────────────────────────
 
 _CARRIER_TRACKING_URLS = {
@@ -408,7 +458,7 @@ def lookup_order(body):
         cur.execute(
             """
             SELECT id, order_number, status, payment_status,
-                   subtotal, discount_amount, shipping_fee, total, created_at,
+                   subtotal, discount_amount, shipping_fee, tax, total, created_at,
                    tracking_number, tracking_carrier, shipped_at, estimated_delivery
             FROM orders
             WHERE customer_email = %s AND order_number = %s
@@ -458,7 +508,7 @@ def lookup_order(body):
         cur.execute(
             """
             SELECT id, order_number, items, total, subtotal, shipping_fee,
-                   discount_amount, status, stripe_payment_intent_id, created_at
+                   discount_amount, tax_amount, status, stripe_payment_intent_id, created_at
             FROM checkout_sessions
             WHERE customer_email = %s AND order_number = %s AND status = 'active'
             ORDER BY created_at DESC LIMIT 1
@@ -477,6 +527,7 @@ def lookup_order(body):
                     'subtotal':        float(session['subtotal']),
                     'discount_amount': float(session['discount_amount'] or 0),
                     'shipping_fee':    float(session['shipping_fee'] or 0),
+                    'tax':             float(session.get('tax_amount') or 0),
                     'total':           float(session['total']),
                     'created_at':      session['created_at'],
                 },
