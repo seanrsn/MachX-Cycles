@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
 import { lookupOrder } from '../../api/public'
 import { safeJsonLd } from '../../utils/safeJsonLd'
@@ -48,18 +49,35 @@ const STATUS_COLOR = {
 }
 
 export default function OrderLookup() {
-  const [email, setEmail]         = useState('')
-  const [orderNum, setOrderNum]   = useState('')
+  const [searchParams] = useSearchParams()
+  // Accept ?order=…&email=… (preferred) or ?order_number=…&email=… (legacy)
+  const initialOrder = (searchParams.get('order') || searchParams.get('order_number') || '').toUpperCase()
+  const initialEmail = searchParams.get('email') || ''
+
+  const [email, setEmail]         = useState(initialEmail)
+  const [orderNum, setOrderNum]   = useState(initialOrder)
   const [loading, setLoading]     = useState(false)
   const [order, setOrder]         = useState(null)
   const [error, setError]         = useState('')
 
-  async function handleLookup(e) {
-    e.preventDefault()
-    if (!email || !orderNum) { setError('Please enter both email and order number.'); return }
+  // Auto-submit if both fields are pre-filled from the URL (deep link from
+  // the order-confirmation page or the customer email). Use a ref so we
+  // only fire the auto-lookup once per mount, even if URL params change.
+  const autoLookedUpRef = useRef(false)
+  useEffect(() => {
+    if (autoLookedUpRef.current) return
+    if (initialEmail && initialOrder) {
+      autoLookedUpRef.current = true
+      doLookup(initialEmail, initialOrder)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function doLookup(em, num) {
+    if (!em || !num) { setError('Please enter both email and order number.'); return }
     setLoading(true); setError(''); setOrder(null)
     try {
-      const data = await lookupOrder(email, orderNum)
+      const data = await lookupOrder(em, num)
       // Backend returns { order: {...}, items: [...], events?: [...], pending_materialization? }
       // Flatten so the existing JSX (which reads order.X) works whether the data
       // came from the orders table or the in-flight checkout_sessions fallback.
@@ -115,7 +133,7 @@ export default function OrderLookup() {
           <p className="text-gray-500 mt-2">Enter your email and order number to check status.</p>
         </div>
 
-        <form onSubmit={handleLookup} className="bg-white rounded-2xl ring-1 ring-gray-200/80 p-6 space-y-4 shadow-sm">
+        <form onSubmit={e => { e.preventDefault(); doLookup(email, orderNum) }} className="bg-white rounded-2xl ring-1 ring-gray-200/80 p-6 space-y-4 shadow-sm">
           {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>

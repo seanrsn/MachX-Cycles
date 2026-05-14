@@ -247,6 +247,13 @@ def _send_shipped_email(payload):
         url_template = _TRACKING_URLS.get(carrier)
         tracking_url = url_template.replace('{n}', tracking_number) if url_template else None
         est = order.get('estimated_delivery')
+        # Deep-link with prefilled order + email so the customer doesn't have
+        # to retype either when they want to check status.
+        site_track_url = (
+            'https://machxcycles.com/track-order'
+            f'?order={urllib.parse.quote(order_number)}'
+            f'&email={urllib.parse.quote(to_email)}'
+        )
 
         items_html = ''.join(
             f'<li style="margin:6px 0;">{html_escape(it["bike_name"])}'
@@ -284,7 +291,7 @@ def _send_shipped_email(payload):
           </table>
           {('<h3 style="margin:0 0 8px 0;font-size:14px;font-weight:600;color:#111827;text-transform:uppercase;letter-spacing:0.05em;">In this shipment</h3><ul style="margin:0 0 20px 0;padding-left:20px;color:#374151;font-size:15px;">' + items_html + '</ul>') if items_html else ''}
           {track_button_html}
-          <p style="margin:24px 0 0 0;color:#6b7280;font-size:13px;line-height:1.5;">Want to check status anytime? Use your email and order number <strong style="color:#111827;font-family:'SF Mono',Menlo,monospace;">{html_escape(order_number)}</strong> at <a href="https://machxcycles.com/track-order" style="color:#ec4899;text-decoration:none;">machxcycles.com/track-order</a>.</p>
+          <p style="margin:24px 0 0 0;color:#6b7280;font-size:13px;line-height:1.5;">Want to check status anytime? <a href="{site_track_url}" style="color:#ec4899;text-decoration:none;">View your order on MachXCycles.com &rarr;</a></p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:20px 32px;border-top:1px solid #e5e7eb;text-align:center;">
           <p style="margin:0;color:#6b7280;font-size:13px;">Questions? Just reply to this email.</p>
@@ -301,7 +308,7 @@ def _send_shipped_email(payload):
             f"Tracking: {tracking_number} ({carrier_label})\n"
             f"{('Estimated delivery: ' + est + chr(10)) if est else ''}\n"
             + (f"Track with {carrier_label}: {tracking_url}\n\n" if tracking_url else '')
-            + f"Or check status at: https://machxcycles.com/track-order\n\n"
+            + f"Or check status at: {site_track_url}\n\n"
             f"Questions? Reply to this email.\n\n"
             f"- MachX Cycles\n"
             f"3149 Emmons Ave, Brooklyn, NY 11235"
@@ -445,7 +452,14 @@ def _send_order_confirmation_email(payload):
                 + f'{html_escape(addr.get("city", ""))}, {html_escape(addr.get("state", ""))} {html_escape(addr.get("zip", ""))}</p>'
             )
 
-        track_url = 'https://machxcycles.com/track-order'
+        # Deep-link with prefilled order number + email so the customer
+        # doesn't have to copy/paste either field — landing on /track-order
+        # auto-submits and shows the status.
+        track_url = (
+            'https://machxcycles.com/track-order'
+            f'?order={urllib.parse.quote(order_number)}'
+            f'&email={urllib.parse.quote(to_email)}'
+        )
 
         html_body = f"""<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
@@ -473,7 +487,7 @@ def _send_order_confirmation_email(payload):
               <a href="{track_url}" style="display:inline-block;background:linear-gradient(135deg,#ec4899 0%,#f97316 100%);color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:600;font-size:15px;">Track your order &rarr;</a>
             </td></tr>
           </table>
-          <p style="margin:24px 0 0 0;color:#6b7280;font-size:13px;line-height:1.5;">Use your email and order number <strong style="color:#111827;font-family:'SF Mono',Menlo,monospace;">{html_escape(order_number)}</strong> at <a href="{track_url}" style="color:#ec4899;text-decoration:none;">machxcycles.com/track-order</a> to check status anytime.</p>
+          <p style="margin:24px 0 0 0;color:#6b7280;font-size:13px;line-height:1.5;">The button above takes you straight to your order — no need to retype anything. Bookmark it to check status anytime.</p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:20px 32px;border-top:1px solid #e5e7eb;text-align:center;">
           <p style="margin:0;color:#6b7280;font-size:13px;">Questions? Just reply to this email - we'll get back to you within a day.</p>
@@ -500,7 +514,7 @@ def _send_order_confirmation_email(payload):
             f"Total: ${total:.2f}\n\n"
             f"Items:\n{items_text}"
             f"{addr_text}\n\n"
-            f"Track at: {track_url} (use your email + order number)\n\n"
+            f"Track your order: {track_url}\n\n"
             f"Questions? Reply to this email.\n\n"
             f"- MachX Cycles\n"
             f"3149 Emmons Ave, Brooklyn, NY 11235"

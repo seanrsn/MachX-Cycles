@@ -1,10 +1,19 @@
 import { useQuery } from '@tanstack/react-query'
-import { ShoppingBag, DollarSign, TrendingUp } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ShoppingBag, DollarSign, TrendingUp, ChevronRight, Package } from 'lucide-react'
 import { getDashboard } from '../../api/admin'
 import { StatCard, Badge, Spinner } from '../../components/common'
 
 const fmt = n => `$${parseFloat(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`
 const fmtDate = d => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'
+
+// "Needs fulfillment" = paid but not yet shipped/cancelled. These are the
+// orders the admin actually has to do something about. Anything that's
+// shipped, completed, or cancelled is past the action threshold.
+const FULFILLMENT_PENDING = new Set(['pending', 'confirmed', 'processing', 'paid'])
+const isFulfillmentPending = o =>
+  FULFILLMENT_PENDING.has(o.status) &&
+  (o.payment_status ? o.payment_status === 'paid' : true)
 
 export default function Dashboard() {
   const { data, isLoading, error } = useQuery({
@@ -86,23 +95,53 @@ export default function Dashboard() {
 
         {/* Recent orders */}
         <div className="bg-white rounded-xl ring-1 ring-gray-200/70 p-6 shadow-sm">
-          <h2 className="text-sm font-bold text-gray-900 mb-4 tracking-tight">Recent Orders</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-bold text-gray-900 tracking-tight">Recent Orders</h2>
+            {/* Quick count of orders that still need to be shipped */}
+            {(() => {
+              const n = (d.recent_orders || []).filter(isFulfillmentPending).length
+              return n > 0 ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-pink-700 bg-pink-50 ring-1 ring-pink-200 px-2 py-0.5 rounded-full">
+                  <Package size={11} /> {n} to fulfill
+                </span>
+              ) : null
+            })()}
+          </div>
           {!d.recent_orders?.length ? (
             <p className="text-sm text-gray-400 text-center py-8">No orders yet</p>
           ) : (
-            <div className="space-y-3">
-              {d.recent_orders.map(o => (
-                <div key={o.id} className="flex items-center justify-between text-sm">
-                  <div>
-                    <div className="font-medium text-gray-900">{o.order_number}</div>
-                    <div className="text-xs text-gray-400">{o.customer_name} · {fmtDate(o.created_at)}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-semibold text-gray-900">{fmt(o.total)}</div>
-                    <Badge status={o.status} label={o.status} />
-                  </div>
-                </div>
-              ))}
+            <div className="-mx-2">
+              {d.recent_orders.map(o => {
+                const needsFulfill = isFulfillmentPending(o)
+                return (
+                  <Link
+                    key={o.id}
+                    to={`/admin/orders/${o.id}`}
+                    className={`group flex items-center justify-between gap-3 px-2 py-2.5 rounded-lg text-sm transition-colors ${
+                      needsFulfill
+                        ? 'bg-pink-50/60 hover:bg-pink-50 ring-1 ring-pink-200/70 mb-1.5'
+                        : 'hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {needsFulfill && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-pink-600 shrink-0" aria-hidden />
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-medium text-gray-900 truncate">{o.order_number}</div>
+                        <div className="text-xs text-gray-400 truncate">{o.customer_name} · {fmtDate(o.created_at)}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="text-right">
+                        <div className="font-semibold text-gray-900">{fmt(o.total)}</div>
+                        <Badge status={o.status} label={o.status} />
+                      </div>
+                      <ChevronRight size={16} className="text-gray-300 group-hover:text-gray-500 transition-colors" />
+                    </div>
+                  </Link>
+                )
+              })}
             </div>
           )}
         </div>

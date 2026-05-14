@@ -131,7 +131,7 @@ function CartStep({ items, onRemove, subtotal, onNext }) {
           <span>Subtotal</span>
           <span className="font-semibold">${subtotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
         </div>
-        <p className="text-xs text-gray-500">Free shipping · sales tax calculated at checkout</p>
+        <p className="text-xs text-gray-500">Sales tax calculated at checkout</p>
       </div>
 
       <button onClick={onNext} className="w-full mx-gradient-btn text-white py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors">
@@ -234,7 +234,10 @@ function ShippingStep({ selected, onSelect, onNext, onBack }) {
               ${selected?.id === r.id ? 'border-pink-600 bg-pink-50' : 'border-gray-200 hover:border-pink-300'}`}>
               <input type="radio" checked={selected?.id === r.id} onChange={() => onSelect(r)} className="accent-pink-600" />
               <div className="flex-1">
-                <p className="font-medium text-gray-900">{r.name}</p>
+                {/* Strip any "(FREE)" / " - FREE" suffix in the DB name —
+                    the price column on the right already conveys cost,
+                    parens are noise. */}
+                <p className="font-medium text-gray-900">{r.name?.replace(/\s*[-—·|]?\s*\(?\s*free\s*\)?\s*$/i, '').trim()}</p>
                 {r.estimated_days && <p className="text-xs text-gray-500">{r.estimated_days}</p>}
               </div>
               <span className="font-semibold text-gray-900">
@@ -423,6 +426,7 @@ function PaymentStep({ items, form, shipping, subtotal, onBack, onSuccess }) {
 
         setOrderInfo({
           order_number: res.order_number,
+          email:        form.email,
           subtotal:     res.subtotal,
           discount:     res.discount,
           shipping_fee: res.shipping_fee,

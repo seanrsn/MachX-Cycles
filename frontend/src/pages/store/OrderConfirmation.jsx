@@ -98,6 +98,13 @@ export default function OrderConfirmation() {
     )
   }
 
+  // Build a deep-link to /track-order with prefilled fields, so customers
+  // don't have to re-type the order number and email they just entered.
+  const trackUrl = order?.order_number
+    ? `/track-order?order=${encodeURIComponent(order.order_number)}` +
+      (order?.email ? `&email=${encodeURIComponent(order.email)}` : '')
+    : '/track-order'
+
   // Pending state (payment processing)
   if (status === 'pending') {
     return (
@@ -119,7 +126,7 @@ export default function OrderConfirmation() {
           </div>
           <div className="flex flex-col gap-3">
             <Link
-              to="/track-order"
+              to={trackUrl}
               className="inline-flex items-center justify-center gap-2 mx-gradient-btn text-white px-8 py-3.5 rounded-xl font-semibold transition-colors"
             >
               Track Order <ArrowRight size={18} />
