@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useEffect, useState, lazy, Suspense } from 'react'
 import { useAuthStore, isTokenExpired } from './store/authStore'
+import AppErrorBoundary from './components/AppErrorBoundary'
 
 // Eager: home page (LCP route — shouldn't block on a chunk fetch)
 import Home from './pages/store/Home'
@@ -68,10 +69,11 @@ function ChunkFallback() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <ScrollToTop />
-      <Suspense fallback={<ChunkFallback />}>
-        <Routes>
+    <AppErrorBoundary>
+      <BrowserRouter>
+        <ScrollToTop />
+        <Suspense fallback={<ChunkFallback />}>
+          <Routes>
           {/* Public storefront */}
           <Route path="/"                  element={<Home />} />
           <Route path="/shop"                element={<Shop />} />
@@ -114,5 +116,6 @@ export default function App() {
         </Routes>
       </Suspense>
     </BrowserRouter>
+    </AppErrorBoundary>
   )
 }
