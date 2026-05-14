@@ -131,7 +131,7 @@ function CartStep({ items, onRemove, subtotal, onNext }) {
           <span>Subtotal</span>
           <span className="font-semibold">${subtotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
         </div>
-        <p className="text-xs text-gray-500">Shipping calculated in next step</p>
+        <p className="text-xs text-gray-500">Free shipping · sales tax calculated at checkout</p>
       </div>
 
       <button onClick={onNext} className="w-full mx-gradient-btn text-white py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors">
@@ -198,16 +198,11 @@ function DetailsStep({ form, onChange, onNext, onBack }) {
               <input value={form.state} onChange={e => onChange('state', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-3 focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="NY" maxLength={2} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">ZIP Code *</label>
-              <input value={form.zip} onChange={e => onChange('zip', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-3 focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="ZIP code" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
-              <input value={form.country} onChange={e => onChange('country', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-3 focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="US" />
-            </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ZIP Code *</label>
+            <input value={form.zip} onChange={e => onChange('zip', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-3 focus:outline-none focus:ring-2 focus:ring-pink-500" placeholder="ZIP code" />
           </div>
+          <p className="text-xs text-gray-400 mt-1">United States only — we don't ship internationally yet.</p>
         </div>
       </div>
 

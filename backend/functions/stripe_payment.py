@@ -102,6 +102,19 @@ def handle_checkout(event):
     except json.JSONDecodeError:
         return _error('Invalid JSON body')
     
+    # Normalize the shipping address country to ISO 3166-1 alpha-2 BEFORE
+    # we persist it. Stripe Tax rejects long forms like "UNITED STATES"
+    # with a 400, and we'd rather store the canonical "US" everywhere
+    # (orders, emails, lookup) than have to map at every read site.
+    _COUNTRY_ALIAS = {
+        '': 'US', None: 'US',
+        'US': 'US', 'USA': 'US',
+        'UNITED STATES': 'US', 'UNITED STATES OF AMERICA': 'US',
+    }
+    addr_in = body.get('shipping_address') or {}
+    raw_country = (addr_in.get('country') or '').strip().upper()
+    addr_in['country'] = _COUNTRY_ALIAS.get(raw_country, raw_country[:2] or 'US')
+
     # Step 1: Create checkout session in database via checkout-db Lambda.
     # This does NOT create a real `orders` row — that happens only after
     # payment_intent.succeeded fires (in stripe-webhook).
@@ -110,7 +123,7 @@ def handle_checkout(event):
         'customer_name': body.get('customer_name'),
         'customer_email': body.get('customer_email'),
         'customer_phone': body.get('customer_phone'),
-        'shipping_address': body.get('shipping_address'),
+        'shipping_address': addr_in,
         'shipping_rate_id': body.get('shipping_rate_id'),
         'items': body.get('items'),
         'promo_code': body.get('promo_code'),
@@ -151,8 +164,9 @@ def handle_checkout(event):
     tax_calculation_id = None
     final_total        = pretax_total
 
-    addr = body.get('shipping_address') or {}
-    if line_items_db and addr.get('postal_code') or addr.get('zip'):
+    addr = addr_in  # already normalized at top of handle_checkout
+
+    if line_items_db and (addr.get('postal_code') or addr.get('zip')):
         try:
             stripe = _get_stripe()
             calc_line_items = [
