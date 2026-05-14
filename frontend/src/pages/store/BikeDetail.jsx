@@ -782,7 +782,7 @@ export default function BikeDetail() {
                   to={bikePath(b)}
                   className="group bg-white rounded-2xl overflow-hidden border border-gray-200 hover:shadow-lg transition-all duration-200 hover:-translate-y-0.5"
                 >
-                  <div className="aspect-[4/3] bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden p-2.5">
+                  <div className="aspect-[4/3] bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden">
                     {img
                       ? <img
                           src={img}
@@ -791,8 +791,7 @@ export default function BikeDetail() {
                           decoding="async"
                           width="600"
                           height="450"
-                          className="w-full h-full object-contain group-hover:scale-[1.04] transition-transform duration-300"
-                          style={{ filter: 'drop-shadow(0 4px 10px rgba(0, 0, 0, 0.08))' }}
+                          className="w-full h-full object-cover object-center group-hover:scale-[1.04] transition-transform duration-300"
                         />
                       : <div className="w-full h-full flex items-center justify-center"><Bike size={36} className="text-gray-300" /></div>
                     }

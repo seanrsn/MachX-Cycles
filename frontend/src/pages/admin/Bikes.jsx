@@ -1,9 +1,32 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Plus, Edit, Trash2, Search, CheckCircle } from 'lucide-react'
-import { getBikes, deleteBike } from '../../api/admin'
+import { getBikes, deleteBike, getThumbUploadUrl } from '../../api/admin'
 import { PageHeader, Badge, Spinner, Button, ConfirmDialog } from '../../components/common'
+
+// Same thumbnail logic used by ImageManager on initial upload — duplicated
+// here so the admin Bikes page can backfill thumbnails for legacy bikes
+// that were uploaded before the thumb pipeline existed.
+const THUMB_SIZE = 192
+async function makeThumb(blob) {
+  const img = await new Promise((res, rej) => {
+    const url = URL.createObjectURL(blob)
+    const i = new Image()
+    i.crossOrigin = 'anonymous'
+    i.onload  = () => { URL.revokeObjectURL(url); res(i) }
+    i.onerror = () => { URL.revokeObjectURL(url); rej(new Error('decode failed')) }
+    i.src = url
+  })
+  const canvas = document.createElement('canvas')
+  canvas.width = THUMB_SIZE; canvas.height = THUMB_SIZE
+  const ctx = canvas.getContext('2d')
+  ctx.imageSmoothingQuality = 'high'
+  const scale = Math.max(THUMB_SIZE / img.naturalWidth, THUMB_SIZE / img.naturalHeight)
+  const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale
+  ctx.drawImage(img, (THUMB_SIZE - dw) / 2, (THUMB_SIZE - dh) / 2, dw, dh)
+  return new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.8))
+}
 
 const fmt = n => `$${parseFloat(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`
 
@@ -30,6 +53,56 @@ export default function Bikes() {
     queryKey: ['admin-bikes', search],
     queryFn:  () => getBikes(search ? { search } : {}),
   })
+
+  // One-shot backfill of thumbnails for bikes whose primary image was
+  // uploaded before the thumb pipeline existed. Runs in the background
+  // when /admin/bikes loads. Each bike: fetch full image, generate 192px
+  // thumb in canvas, upload to a presigned URL the backend hands back.
+  // The backend commits thumb_url upfront; the table's img.onError
+  // gracefully falls back to the full image if S3 hasn't received the
+  // PUT yet (~few seconds after backfill triggers).
+  const backfilledRef = useRef(new Set())
+  useEffect(() => {
+    const bikes = data?.bikes || []
+    const needsBackfill = bikes.filter(b =>
+      b.primary_image_url && !b.primary_thumb_url
+      && b.primary_image_id && !backfilledRef.current.has(b.primary_image_id)
+    )
+    if (needsBackfill.length === 0) return
+
+    let cancelled = false
+    ;(async () => {
+      // Throttle to 2 concurrent so we don't hammer the device or
+      // saturate the network with full-resolution downloads.
+      for (let i = 0; i < needsBackfill.length; i += 2) {
+        if (cancelled) return
+        await Promise.all(needsBackfill.slice(i, i + 2).map(async bike => {
+          backfilledRef.current.add(bike.primary_image_id)
+          try {
+            const blob = await fetch(bike.primary_image_url).then(r => r.ok ? r.blob() : null)
+            if (!blob) return
+            const thumbBlob = await makeThumb(blob)
+            if (!thumbBlob) return
+            const { upload_url } = await getThumbUploadUrl(bike.id, bike.primary_image_id)
+            await fetch(upload_url, {
+              method:  'PUT',
+              headers: {
+                'Content-Type':  'image/jpeg',
+                'Cache-Control': 'public, max-age=31536000, immutable',
+              },
+              body: thumbBlob,
+            })
+          } catch (e) {
+            console.warn(`thumb backfill failed for bike ${bike.id}:`, e)
+          }
+        }))
+      }
+      // Refresh the list once so the UI starts using the fresh thumb URLs
+      qc.invalidateQueries({ queryKey: ['admin-bikes'] })
+    })()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.bikes?.length])
 
   const deleteMut = useMutation({
     mutationFn: id => deleteBike(id),
@@ -86,12 +159,35 @@ export default function Bikes() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {bikes.map(bike => (
-                <tr key={bike.id} className="hover:bg-gray-50 transition-colors">
+                <tr
+                  key={bike.id}
+                  className="hover:bg-gray-50 transition-colors"
+                >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <div className="w-12 h-12 rounded-lg border border-gray-200 overflow-hidden bg-gray-100 flex-shrink-0">
                         {bike.primary_image_url ? (
-                          <img src={bike.primary_image_url} alt={bike.name} className="w-full h-full object-cover" />
+                          <img
+                            // Prefer the small thumb if backend has one; fall
+                            // back to full image for legacy bikes uploaded
+                            // before the thumbnail pipeline existed.
+                            src={bike.primary_thumb_url || bike.primary_image_url}
+                            alt={bike.name}
+                            loading="lazy"
+                            decoding="async"
+                            fetchpriority="low"
+                            width="48"
+                            height="48"
+                            className="w-full h-full object-cover"
+                            // If the thumb URL 404s (e.g. backfill failed for
+                            // this image, or thumb upload didn't land), swap
+                            // to the full image so the row still renders.
+                            onError={(e) => {
+                              if (bike.primary_image_url && e.currentTarget.src !== bike.primary_image_url) {
+                                e.currentTarget.src = bike.primary_image_url
+                              }
+                            }}
+                          />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-gray-300 text-xs">No img</div>
                         )}

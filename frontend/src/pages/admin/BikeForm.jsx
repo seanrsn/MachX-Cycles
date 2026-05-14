@@ -74,6 +74,42 @@ async function compressImage(file) {
   }
 }
 
+// Generate a small square cover-cropped JPEG for the admin Bikes table.
+// 192px = 4× DPR for the 48px display target — enough for retina without
+// burning bandwidth. Returns null on any failure (caller falls back to
+// using the full image; the table just renders slightly slower for that
+// row instead of breaking).
+const THUMB_SIZE    = 192
+const THUMB_QUALITY = 0.8
+async function createThumbnail(file) {
+  if (!file.type.startsWith('image/')) return null
+  if (file.type === 'image/gif')        return null  // would lose animation
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file)
+      const i = new Image()
+      i.onload  = () => { URL.revokeObjectURL(url); resolve(i) }
+      i.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode failed')) }
+      i.src = url
+    })
+    const canvas = document.createElement('canvas')
+    canvas.width  = THUMB_SIZE
+    canvas.height = THUMB_SIZE
+    const ctx = canvas.getContext('2d')
+    ctx.imageSmoothingQuality = 'high'
+    // Cover-crop centered: scale to fill THUMB_SIZE, center the result.
+    const scale = Math.max(THUMB_SIZE / img.naturalWidth, THUMB_SIZE / img.naturalHeight)
+    const dw = img.naturalWidth  * scale
+    const dh = img.naturalHeight * scale
+    ctx.drawImage(img, (THUMB_SIZE - dw) / 2, (THUMB_SIZE - dh) / 2, dw, dh)
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', THUMB_QUALITY))
+    if (!blob) return null
+    return new File([blob], 'thumb.jpg', { type: 'image/jpeg' })
+  } catch {
+    return null
+  }
+}
+
 // ── ImageManager ──────────────────────────────────────────────────────────────
 
 function ImageManager({ bikeId, initialImages = [] }) {
@@ -143,18 +179,26 @@ function ImageManager({ bikeId, initialImages = [] }) {
       }
 
       try {
-        // 1. Get presigned URL (use post-compression filename/content-type)
-        const { upload_url, image_url, image_id } = await getUploadUrl(bikeId, {
-          filename:     file.name,
-          content_type: file.type,
-        })
+        // 1. Get presigned URLs — backend returns ONE for the main image
+        //    and ONE for the thumb (null for videos).
+        const { upload_url, image_url, thumb_upload_url, thumb_url, image_id } =
+          await getUploadUrl(bikeId, {
+            filename:     file.name,
+            content_type: file.type,
+          })
 
         // 2. PUT directly to S3.
         // Cache-Control matches the value the backend baked into the presigned
         // URL signature — must be sent verbatim or S3 rejects with signature
         // mismatch. Filenames are UUIDs so 1y immutable is safe.
         setUploads(prev => prev.map(u => u.id === item.id ? { ...u, progress: 30 } : u))
-        const putRes = await fetch(upload_url, {
+
+        // Generate the thumbnail BEFORE uploading the main image. That way
+        // the heavy main-image PUT and the small thumb PUT can run in
+        // parallel — the thumb is < 30KB so it lands well before the main.
+        const thumbBlob = !isVid ? await createThumbnail(file) : null
+
+        const mainPut = fetch(upload_url, {
           method:  'PUT',
           headers: {
             'Content-Type':  file.type,
@@ -162,10 +206,23 @@ function ImageManager({ bikeId, initialImages = [] }) {
           },
           body:    file,
         })
-        if (!putRes.ok) throw new Error('S3 upload failed')
+        const thumbPut = (thumbBlob && thumb_upload_url) ? fetch(thumb_upload_url, {
+          method:  'PUT',
+          headers: {
+            'Content-Type':  'image/jpeg',
+            'Cache-Control': 'public, max-age=31536000, immutable',
+          },
+          body:    thumbBlob,
+        }) : Promise.resolve({ ok: true })
+
+        const [mainRes, thumbRes] = await Promise.all([mainPut, thumbPut])
+        if (!mainRes.ok) throw new Error('S3 upload failed')
+        // A thumb failure isn't fatal — it just means the admin list will
+        // render slowly for THIS image until re-uploaded.
+        if (thumbBlob && !thumbRes.ok) console.warn('thumbnail upload failed; main image is fine')
 
         setUploads(prev => prev.map(u => u.id === item.id ? { ...u, progress: 100, done: true } : u))
-        setImages(prev => [...prev, { id: image_id, url: image_url }])
+        setImages(prev => [...prev, { id: image_id, url: image_url, thumb_url }])
 
         // Auto-remove from upload list after a moment
         setTimeout(() => setUploads(prev => prev.filter(u => u.id !== item.id)), 1500)

@@ -34,7 +34,7 @@ function BikeCard({ bike }) {
   ].filter(Boolean)
   return (
     <Link to={bikePath(bike)} className="group bg-white rounded-2xl overflow-hidden ring-1 ring-gray-200/80 hover:ring-pink-200 hover:shadow-xl hover:shadow-pink-100/40 transition-all duration-300 hover:-translate-y-1">
-      <div className="aspect-[4/3] bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden relative p-3">
+      <div className="aspect-[4/3] bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden relative">
         {img
           ? <img
               src={img}
@@ -43,8 +43,10 @@ function BikeCard({ bike }) {
               decoding="async"
               width="800"
               height="600"
-              className="w-full h-full object-contain group-hover:scale-[1.04] transition-transform duration-300"
-              style={{ filter: 'drop-shadow(0 4px 12px rgba(0, 0, 0, 0.08))' }}
+              // object-cover so portrait phone photos and landscape studio
+              // photos both fill the card uniformly. Center the focal point
+              // since most sellers frame the bike in the middle of the shot.
+              className="w-full h-full object-cover object-center group-hover:scale-[1.04] transition-transform duration-300"
             />
           : <div className="w-full h-full flex items-center justify-center"><Bike size={48} className="text-gray-300" /></div>
         }

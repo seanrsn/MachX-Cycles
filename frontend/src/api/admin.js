@@ -19,6 +19,9 @@ export const releaseBikeReservation = (id) => api.post(`/admin/bikes/${id}/relea
 export const getUploadUrl   = (bikeId, body)      => api.post(`/admin/bikes/${bikeId}/images`, body)
 export const deleteImage    = (bikeId, imgId)     => api.delete(`/admin/bikes/${bikeId}/images/${imgId}`)
 export const reorderImages  = (bikeId, imageIds)  => api.put(`/admin/bikes/${bikeId}/images/reorder`, { image_ids: imageIds })
+// Backfill a thumbnail for an existing image (used by the admin Bikes page
+// to lazy-generate thumbs for legacy uploads that predate the thumb pipeline).
+export const getThumbUploadUrl = (bikeId, imgId)  => api.post(`/admin/bikes/${bikeId}/images/${imgId}/thumb`, {})
 
 // ── Orders ────────────────────────────────────────────────────────────────────
 export const getOrders  = (params = {}) => api.get('/admin/orders?' + new URLSearchParams(params))

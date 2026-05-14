@@ -55,6 +55,7 @@ _RE_BIKE_RELEASE    = re.compile(r'^/admin/bikes/(\d+)/release-reservation$')
 _RE_IMAGES          = re.compile(r'^/admin/bikes/(\d+)/images$')
 _RE_IMAGES_REORDER  = re.compile(r'^/admin/bikes/(\d+)/images/reorder$')
 _RE_IMAGE           = re.compile(r'^/admin/bikes/(\d+)/images/(\d+)$')
+_RE_IMAGE_THUMB     = re.compile(r'^/admin/bikes/(\d+)/images/(\d+)/thumb$')
 _RE_ORDERS          = re.compile(r'^/admin/orders$')
 _RE_ORDER           = re.compile(r'^/admin/orders/(\d+)$')
 _RE_PROMOTIONS      = re.compile(r'^/admin/promotions$')
@@ -147,6 +148,13 @@ def _route(method, path, event):
     if m:
         bike_id = int(m.group(1))
         if method == 'POST': return upload_image(bike_id, event)
+
+    # Backfill thumbnail for an existing image (must come BEFORE _RE_IMAGE
+    # so it doesn't try to match img_id="thumb").
+    m = _RE_IMAGE_THUMB.match(path)
+    if m:
+        bike_id, img_id = int(m.group(1)), int(m.group(2))
+        if method == 'POST': return generate_thumb_upload(bike_id, img_id, event)
 
     # Single image
     m = _RE_IMAGE.match(path)
@@ -270,14 +278,20 @@ _PENDING_MIGRATIONS = [
     ("checkout_sessions", "tax_calculation_id",  "ALTER TABLE checkout_sessions ADD COLUMN tax_calculation_id VARCHAR(100) DEFAULT NULL"),
     ("orders",            "tax_calculation_id",  "ALTER TABLE orders ADD COLUMN tax_calculation_id VARCHAR(100) DEFAULT NULL"),
     ("orders",            "tax_transaction_id",  "ALTER TABLE orders ADD COLUMN tax_transaction_id VARCHAR(100) DEFAULT NULL"),
+    # 2026-05-14: per-image thumbnail URL for fast admin list rendering
+    ("bike_images",       "thumb_url",           "ALTER TABLE bike_images ADD COLUMN thumb_url VARCHAR(500) DEFAULT NULL"),
 ]
 
 
 def _run_migrations():
-    applied, skipped = [], []
+    applied, skipped, errors = [], [], []
     conn = get_connection()
     try:
         with conn.cursor() as cur:
+            # Bail in seconds rather than the Lambda's full timeout if any
+            # ALTER TABLE is blocked behind a stale metadata lock — surface
+            # the failure cleanly instead of timing out the whole invocation.
+            cur.execute("SET SESSION lock_wait_timeout = 8")
             for table, column, ddl in _PENDING_MIGRATIONS:
                 cur.execute(
                     """SELECT 1 FROM information_schema.columns
@@ -287,8 +301,12 @@ def _run_migrations():
                 if cur.fetchone():
                     skipped.append(f"{table}.{column}")
                     continue
-                cur.execute(ddl)
-                applied.append(f"{table}.{column}")
+                try:
+                    cur.execute(ddl)
+                    applied.append(f"{table}.{column}")
+                except Exception as e:
+                    # Lock timeout, syntax error, etc — record but don't abort the batch.
+                    errors.append(f"{table}.{column}: {str(e)[:200]}")
 
             # Data cleanups — idempotent because each WHERE only matches the
             # OLD form. Once normalized, subsequent runs do nothing.
@@ -344,7 +362,7 @@ def _run_migrations():
             if cur.rowcount: data_changes.append(f"unstuck bike reservations: {cur.rowcount}")
 
         conn.commit()
-        return success({'applied': applied, 'skipped': skipped, 'data_cleanups': data_changes})
+        return success({'applied': applied, 'skipped': skipped, 'data_cleanups': data_changes, 'errors': errors})
     except Exception as e:
         conn.rollback()
         print(f"_run_migrations error: {e}")
@@ -634,13 +652,29 @@ def list_bikes(event):
 
         where = ('WHERE ' + ' AND '.join(where_clauses)) if where_clauses else ''
 
+        # Probe whether the bike_images.thumb_url column exists. The migration
+        # may be stuck behind a metadata lock — without this, a missing column
+        # would crash the entire admin Bikes page.
+        cur.execute(
+            """SELECT 1 FROM information_schema.columns
+               WHERE table_schema = DATABASE()
+                 AND table_name = 'bike_images'
+                 AND column_name = 'thumb_url' LIMIT 1"""
+        )
+        thumb_select = (
+            "(SELECT thumb_url FROM bike_images WHERE bike_id = b.id ORDER BY sort_order LIMIT 1)"
+            if cur.fetchone() else "NULL"
+        )
+
         cur.execute(
             f"""
             SELECT
                 b.*,
                 c.name  AS category_name,
                 COUNT(DISTINCT bi.id) AS image_count,
-                (SELECT url FROM bike_images WHERE bike_id = b.id ORDER BY sort_order LIMIT 1) AS primary_image_url
+                (SELECT id  FROM bike_images WHERE bike_id = b.id ORDER BY sort_order LIMIT 1) AS primary_image_id,
+                (SELECT url FROM bike_images WHERE bike_id = b.id ORDER BY sort_order LIMIT 1) AS primary_image_url,
+                {thumb_select} AS primary_thumb_url
             FROM bikes b
             LEFT JOIN categories  c  ON c.id  = b.category_id
             LEFT JOIN bike_images  bi  ON bi.bike_id = b.id
@@ -968,8 +1002,20 @@ def upload_image(bike_id: int, event):
 
     # Sanitise filename
     safe_name = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
-    s3_key    = f"bikes/{bike_id}/{uuid.uuid4()}-{safe_name}"
+    img_uuid  = uuid.uuid4()
+    s3_key    = f"bikes/{bike_id}/{img_uuid}-{safe_name}"
     image_url = f"{IMAGES_CDN_BASE}/{s3_key}"
+
+    # Per-image thumbnail. Thumb is ALWAYS JPEG (frontend converts before
+    # upload) regardless of source format — small + universally renderable.
+    # Lives in a `/thumbs/` subprefix so it's easy to spot in the bucket.
+    is_video    = content_type.startswith('video/')
+    thumb_key   = None
+    thumb_url   = None
+    thumb_upload_url = None
+    if not is_video:
+        thumb_key = f"bikes/{bike_id}/thumbs/{img_uuid}-{safe_name.rsplit('.', 1)[0]}.jpg"
+        thumb_url = f"{IMAGES_CDN_BASE}/{thumb_key}"
 
     s3 = boto3.client('s3', region_name=AWS_REGION)
     upload_url = s3.generate_presigned_url(
@@ -984,6 +1030,17 @@ def upload_image(bike_id: int, event):
         },
         ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS,
     )
+    if thumb_key:
+        thumb_upload_url = s3.generate_presigned_url(
+            'put_object',
+            Params={
+                'Bucket':       IMAGES_BUCKET,
+                'Key':          thumb_key,
+                'ContentType':  'image/jpeg',
+                'CacheControl': 'public, max-age=31536000, immutable',
+            },
+            ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS,
+        )
 
     conn = get_connection()
     try:
@@ -995,10 +1052,24 @@ def upload_image(bike_id: int, event):
             )
             max_sort = cur.fetchone()['max_sort']
 
-            cur.execute(
-                "INSERT INTO bike_images (bike_id, url, sort_order) VALUES (%s, %s, %s)",
-                (bike_id, image_url, max_sort + 1)
-            )
+            # Try to write thumb_url; fall back to legacy schema if the
+            # column doesn't exist yet (migration may be stuck behind a
+            # metadata lock; admin UI still works either way).
+            try:
+                cur.execute(
+                    "INSERT INTO bike_images (bike_id, url, thumb_url, sort_order) VALUES (%s, %s, %s, %s)",
+                    (bike_id, image_url, thumb_url, max_sort + 1)
+                )
+            except Exception as e:
+                msg = str(e).lower()
+                if 'unknown column' in msg or "doesn't exist" in msg:
+                    print(f"upload_image: thumb_url column missing, falling back: {e}")
+                    cur.execute(
+                        "INSERT INTO bike_images (bike_id, url, sort_order) VALUES (%s, %s, %s)",
+                        (bike_id, image_url, max_sort + 1)
+                    )
+                else:
+                    raise
             image_id = cur.lastrowid
         conn.commit()
     except Exception:
@@ -1006,11 +1077,13 @@ def upload_image(bike_id: int, event):
         raise
 
     return success({
-        'upload_url': upload_url,
-        'image_url':  image_url,
-        'image_id':   image_id,
-        's3_key':     s3_key,
-        'expires_in': PRESIGNED_URL_EXPIRY_SECONDS,
+        'upload_url':       upload_url,
+        'image_url':        image_url,
+        'thumb_upload_url': thumb_upload_url,  # nullable for videos
+        'thumb_url':        thumb_url,
+        'image_id':         image_id,
+        's3_key':           s3_key,
+        'expires_in':       PRESIGNED_URL_EXPIRY_SECONDS,
     }, status=201)
 
 
@@ -1072,6 +1145,69 @@ def delete_image(bike_id: int, img_id: int):
                            bike_id, img_id, s3_key, exc)
 
     return success({'message': f'Image {img_id} removed'})
+
+
+def generate_thumb_upload(bike_id: int, img_id: int, event):
+    """Generate a presigned PUT URL for backfilling a thumbnail on an
+    existing image. Frontend (admin Bikes page) iterates over rows that
+    are missing primary_thumb_url, fetches the main image, generates the
+    thumb client-side, and PUTs to the URL we return here. We commit the
+    thumb_url to the DB upfront so subsequent reads see it immediately —
+    the img.onError fallback in the table catches the brief window
+    between commit and S3 PUT actually landing."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, url FROM bike_images WHERE id = %s AND bike_id = %s",
+                (img_id, bike_id)
+            )
+            row = cur.fetchone()
+            if not row:
+                return error('Image not found', status=404)
+
+            # Build the thumb key: same uuid prefix as the main image, in /thumbs/
+            main_key = _s3_key_from_url(row['url'])
+            if not main_key:
+                return error('Main image has no S3 key — cannot derive thumb path', status=400)
+            # main_key looks like: bikes/{bike_id}/{uuid}-{name}.{ext}
+            # thumb key:           bikes/{bike_id}/thumbs/{uuid}-{name}.jpg
+            parts = main_key.rsplit('/', 1)
+            if len(parts) != 2:
+                return error('Unexpected S3 key shape', status=400)
+            dir_prefix, leaf = parts
+            leaf_no_ext      = leaf.rsplit('.', 1)[0]
+            thumb_key        = f"{dir_prefix}/thumbs/{leaf_no_ext}.jpg"
+            thumb_url        = f"{IMAGES_CDN_BASE}/{thumb_key}"
+
+            s3 = boto3.client('s3', region_name=AWS_REGION)
+            upload_url = s3.generate_presigned_url(
+                'put_object',
+                Params={
+                    'Bucket':       IMAGES_BUCKET,
+                    'Key':          thumb_key,
+                    'ContentType':  'image/jpeg',
+                    'CacheControl': 'public, max-age=31536000, immutable',
+                },
+                ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS,
+            )
+
+            # Commit the URL upfront. The img.onError fallback in the admin
+            # table covers the brief window before the PUT lands.
+            cur.execute(
+                "UPDATE bike_images SET thumb_url = %s WHERE id = %s",
+                (thumb_url, img_id)
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    return success({
+        'upload_url': upload_url,
+        'thumb_url':  thumb_url,
+        'expires_in': PRESIGNED_URL_EXPIRY_SECONDS,
+    })
 
 
 def reorder_images(bike_id: int, event):
