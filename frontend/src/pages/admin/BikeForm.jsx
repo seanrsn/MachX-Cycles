@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, Save, Upload, X, Film, ImageIcon, CheckCircle, Bike, GripVertical, AlertTriangle, Clock } from 'lucide-react'
 import {
@@ -421,7 +421,11 @@ export default function BikeForm() {
   const { id }   = useParams()
   const isEdit   = !!id
   const navigate = useNavigate()
+  const location = useLocation()
   const qc       = useQueryClient()
+  // True when we just landed here from the create flow — used to surface
+  // a "now add photos" hint without persisting the flag anywhere.
+  const justCreated = !!location.state?.justCreated
 
   const [form, setForm] = useState({
     name: '', category_id: 1, description: '', base_price: '', msrp: '',
@@ -512,7 +516,17 @@ export default function BikeForm() {
       // Show success state then redirect
       setSuccess(true)
       setTimeout(() => {
-        navigate('/admin/bikes')
+        // For NEW bikes, jump into edit mode for the just-created bike so
+        // the user can immediately upload photos/videos (the media manager
+        // is disabled before save because images need a bike_id to attach
+        // to). For EDIT, back to the list — they're done.
+        if (!isEdit && bikeId) {
+          navigate(`/admin/bikes/${bikeId}/edit`, {
+            state: { justCreated: true },
+          })
+        } else {
+          navigate('/admin/bikes')
+        }
       }, 1200)
     } catch (err) {
       setError(err.message || 'Failed to save bike.')
@@ -572,6 +586,12 @@ export default function BikeForm() {
       )}
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>}
+
+      {justCreated && (
+        <div className="bg-green-50 border border-green-200 text-green-800 text-sm rounded-lg px-4 py-3">
+          ✓ Bike created. Now scroll down to add photos and videos.
+        </div>
+      )}
 
       {/* Active reservation banner — only renders when a buyer is *actively*
           checking out this bike. Hides when:

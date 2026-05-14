@@ -507,14 +507,24 @@ def _handle_payment_succeeded(pi, secret_key):
             addr = json.loads(addr)
         addr_text = f"{addr.get('city', '')}, {addr.get('state', '')}" if addr else "N/A"
 
-        sms_message = (
-            f"🚴 NEW ORDER: {order_info['order_number']}\n"
-            f"💰 ${order_info['total']:.2f}\n"
-            f"👤 {order_info['customer_name']}\n"
-            f"📍 {addr_text}\n"
-            f"📦 {items_text}\n"
-            f"📧 {order_info['customer_email']}"
-        )
+        # Deep link to the admin order detail page so admin can tap from
+        # the SMS to jump straight in. If they're not logged in, /login
+        # remembers the intended destination via RequireAuth and routes
+        # them back after auth.
+        admin_url = f"https://machxcycles.com/admin/orders/{order_info['order_id']}" \
+            if order_info.get('order_id') else None
+
+        sms_lines = [
+            f"🚴 NEW ORDER: {order_info['order_number']}",
+            f"💰 ${order_info['total']:.2f}",
+            f"👤 {order_info['customer_name']}",
+            f"📍 {addr_text}",
+            f"📦 {items_text}",
+            f"📧 {order_info['customer_email']}",
+        ]
+        if admin_url:
+            sms_lines.append(f"🔗 {admin_url}")
+        sms_message = "\n".join(sms_lines)
 
         _send_sms(sms_message)
         _send_customer_order_email(order_info, addr)
