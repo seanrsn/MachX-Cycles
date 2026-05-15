@@ -18,18 +18,18 @@ function BikeCard({ bike }) {
     : null
   return (
     <Link to={bikePath(bike)} className="group bg-white rounded-2xl overflow-hidden ring-1 ring-gray-200/80 hover:ring-pink-200 hover:shadow-xl hover:shadow-pink-100/40 transition-all duration-300 hover:-translate-y-1">
-      <div className="aspect-[4/3] bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden relative">
+      {/* 4:5 portrait container + object-contain: matches typical phone-photo
+          aspect, never crops the bike. See BikeCard in Shop.jsx for rationale. */}
+      <div className="aspect-[4/5] bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden relative">
         {img
           ? <img
               src={img}
               alt={`${bike.name} — pre-owned`}
               loading="lazy"
               decoding="async"
-              width="800"
-              height="600"
-              // object-cover so every card looks the same regardless of
-              // whether the seller shot portrait or landscape.
-              className="w-full h-full object-cover object-center group-hover:scale-[1.04] transition-transform duration-300"
+              width="640"
+              height="800"
+              className="w-full h-full object-contain group-hover:scale-[1.04] transition-transform duration-300"
             />
           : <div className="w-full h-full flex items-center justify-center"><Bike size={48} className="text-gray-300" /></div>
         }

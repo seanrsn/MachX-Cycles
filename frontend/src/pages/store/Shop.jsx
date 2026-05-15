@@ -34,19 +34,24 @@ function BikeCard({ bike }) {
   ].filter(Boolean)
   return (
     <Link to={bikePath(bike)} className="group bg-white rounded-2xl overflow-hidden ring-1 ring-gray-200/80 hover:ring-pink-200 hover:shadow-xl hover:shadow-pink-100/40 transition-all duration-300 hover:-translate-y-1">
-      <div className="aspect-[4/3] bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden relative">
+      {/*
+        4:5 portrait container matches typical phone photo aspect (3:4 ≈ 0.75)
+        much more closely than the old 4:3 (1.33). Combined with object-contain,
+        every bike fits fully in its card without ever being cropped — and
+        because most uploads ARE phone-portrait, the bike fills most of the
+        container. Landscape uploads (rare) appear slightly smaller but stay
+        whole. Trade-off chosen by user: never crop > fill every pixel.
+      */}
+      <div className="aspect-[4/5] bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden relative">
         {img
           ? <img
               src={img}
               alt={`${bike.name} — pre-owned`}
               loading="lazy"
               decoding="async"
-              width="800"
-              height="600"
-              // object-cover so portrait phone photos and landscape studio
-              // photos both fill the card uniformly. Center the focal point
-              // since most sellers frame the bike in the middle of the shot.
-              className="w-full h-full object-cover object-center group-hover:scale-[1.04] transition-transform duration-300"
+              width="640"
+              height="800"
+              className="w-full h-full object-contain group-hover:scale-[1.04] transition-transform duration-300"
             />
           : <div className="w-full h-full flex items-center justify-center"><Bike size={48} className="text-gray-300" /></div>
         }
@@ -476,7 +481,7 @@ export default function Shop() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="bg-white rounded-2xl overflow-hidden border border-gray-200 animate-pulse">
-                <div className="aspect-[4/3] bg-gray-200" />
+                <div className="aspect-[4/5] bg-gray-200" />
                 <div className="p-4 space-y-2">
                   <div className="h-3 bg-gray-200 rounded w-1/3" />
                   <div className="h-4 bg-gray-200 rounded w-3/4" />
