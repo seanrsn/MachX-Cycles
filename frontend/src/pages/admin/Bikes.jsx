@@ -8,6 +8,9 @@ import { PageHeader, Badge, Spinner, Button, ConfirmDialog } from '../../compone
 // Same thumbnail logic used by ImageManager on initial upload — duplicated
 // here so the admin Bikes page can backfill thumbnails for legacy bikes
 // that were uploaded before the thumb pipeline existed.
+// Output is WebP (not JPEG) to preserve the alpha channel — most uploads
+// have background-removed bikes with transparent fills, and JPEG would
+// render them as solid black.
 const THUMB_SIZE = 192
 async function makeThumb(blob) {
   const img = await new Promise((res, rej) => {
@@ -25,7 +28,7 @@ async function makeThumb(blob) {
   const scale = Math.max(THUMB_SIZE / img.naturalWidth, THUMB_SIZE / img.naturalHeight)
   const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale
   ctx.drawImage(img, (THUMB_SIZE - dw) / 2, (THUMB_SIZE - dh) / 2, dw, dh)
-  return new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.8))
+  return new Promise(res => canvas.toBlob(res, 'image/webp', 0.85))
 }
 
 const fmt = n => `$${parseFloat(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`
@@ -87,7 +90,7 @@ export default function Bikes() {
             await fetch(upload_url, {
               method:  'PUT',
               headers: {
-                'Content-Type':  'image/jpeg',
+                'Content-Type':  'image/webp',
                 'Cache-Control': 'public, max-age=31536000, immutable',
               },
               body: thumbBlob,

@@ -345,6 +345,16 @@ def _run_migrations():
             """)
             if cur.rowcount: data_changes.append(f"deduped status_change/shipped: {cur.rowcount}")
 
+            # Clear JPEG thumbnails — first version of the pipeline encoded
+            # thumbs as JPEG which destroys the alpha channel on
+            # background-removed product photos (turns transparent areas
+            # solid black). Clearing the URL triggers the admin Bikes page's
+            # auto-backfill to regenerate as WebP next time it loads.
+            cur.execute(
+                "UPDATE bike_images SET thumb_url = NULL WHERE thumb_url LIKE '%.jpg'"
+            )
+            if cur.rowcount: data_changes.append(f"cleared JPEG thumbs for WebP rebuild: {cur.rowcount}")
+
             # Clear stuck reservations on bikes that admin un-sold but whose
             # reservation_state never got reset. Pre-fix, the only way out was
             # to manually call /admin/bikes/{id}/release-reservation. Post-fix,
@@ -1006,15 +1016,16 @@ def upload_image(bike_id: int, event):
     s3_key    = f"bikes/{bike_id}/{img_uuid}-{safe_name}"
     image_url = f"{IMAGES_CDN_BASE}/{s3_key}"
 
-    # Per-image thumbnail. Thumb is ALWAYS JPEG (frontend converts before
-    # upload) regardless of source format — small + universally renderable.
+    # Per-image thumbnail. Thumb is ALWAYS WebP — preserves alpha for
+    # background-removed product photos (JPEG would render transparency
+    # as solid black) AND is smaller than JPEG at the same quality.
     # Lives in a `/thumbs/` subprefix so it's easy to spot in the bucket.
     is_video    = content_type.startswith('video/')
     thumb_key   = None
     thumb_url   = None
     thumb_upload_url = None
     if not is_video:
-        thumb_key = f"bikes/{bike_id}/thumbs/{img_uuid}-{safe_name.rsplit('.', 1)[0]}.jpg"
+        thumb_key = f"bikes/{bike_id}/thumbs/{img_uuid}-{safe_name.rsplit('.', 1)[0]}.webp"
         thumb_url = f"{IMAGES_CDN_BASE}/{thumb_key}"
 
     s3 = boto3.client('s3', region_name=AWS_REGION)
@@ -1036,7 +1047,7 @@ def upload_image(bike_id: int, event):
             Params={
                 'Bucket':       IMAGES_BUCKET,
                 'Key':          thumb_key,
-                'ContentType':  'image/jpeg',
+                'ContentType':  'image/webp',
                 'CacheControl': 'public, max-age=31536000, immutable',
             },
             ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS,
@@ -1177,7 +1188,7 @@ def generate_thumb_upload(bike_id: int, img_id: int, event):
                 return error('Unexpected S3 key shape', status=400)
             dir_prefix, leaf = parts
             leaf_no_ext      = leaf.rsplit('.', 1)[0]
-            thumb_key        = f"{dir_prefix}/thumbs/{leaf_no_ext}.jpg"
+            thumb_key        = f"{dir_prefix}/thumbs/{leaf_no_ext}.webp"
             thumb_url        = f"{IMAGES_CDN_BASE}/{thumb_key}"
 
             s3 = boto3.client('s3', region_name=AWS_REGION)
@@ -1186,7 +1197,7 @@ def generate_thumb_upload(bike_id: int, img_id: int, event):
                 Params={
                     'Bucket':       IMAGES_BUCKET,
                     'Key':          thumb_key,
-                    'ContentType':  'image/jpeg',
+                    'ContentType':  'image/webp',
                     'CacheControl': 'public, max-age=31536000, immutable',
                 },
                 ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS,

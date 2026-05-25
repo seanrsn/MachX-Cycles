@@ -74,13 +74,15 @@ async function compressImage(file) {
   }
 }
 
-// Generate a small square cover-cropped JPEG for the admin Bikes table.
+// Generate a small square cover-cropped WebP for the admin Bikes table.
 // 192px = 4× DPR for the 48px display target — enough for retina without
-// burning bandwidth. Returns null on any failure (caller falls back to
-// using the full image; the table just renders slightly slower for that
-// row instead of breaking).
+// burning bandwidth. WebP (not JPEG) because most uploaded bike photos
+// have transparent/removed backgrounds — JPEG would render the alpha
+// channel as solid black, ruining the storefront look. WebP keeps the
+// transparency AND is smaller than JPEG at the same quality.
+// Returns null on any failure (caller falls back to the full image).
 const THUMB_SIZE    = 192
-const THUMB_QUALITY = 0.8
+const THUMB_QUALITY = 0.85
 async function createThumbnail(file) {
   if (!file.type.startsWith('image/')) return null
   if (file.type === 'image/gif')        return null  // would lose animation
@@ -102,9 +104,9 @@ async function createThumbnail(file) {
     const dw = img.naturalWidth  * scale
     const dh = img.naturalHeight * scale
     ctx.drawImage(img, (THUMB_SIZE - dw) / 2, (THUMB_SIZE - dh) / 2, dw, dh)
-    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', THUMB_QUALITY))
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/webp', THUMB_QUALITY))
     if (!blob) return null
-    return new File([blob], 'thumb.jpg', { type: 'image/jpeg' })
+    return new File([blob], 'thumb.webp', { type: 'image/webp' })
   } catch {
     return null
   }
@@ -209,7 +211,7 @@ function ImageManager({ bikeId, initialImages = [] }) {
         const thumbPut = (thumbBlob && thumb_upload_url) ? fetch(thumb_upload_url, {
           method:  'PUT',
           headers: {
-            'Content-Type':  'image/jpeg',
+            'Content-Type':  'image/webp',
             'Cache-Control': 'public, max-age=31536000, immutable',
           },
           body:    thumbBlob,
