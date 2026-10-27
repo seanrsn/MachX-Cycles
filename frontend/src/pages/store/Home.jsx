@@ -1,7 +1,8 @@
+import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Helmet } from 'react-helmet-async'
-import { ArrowRight, Bike, CheckCircle, Truck, Search, Shield, Headphones, Trophy, RotateCcw, Star, Wrench, Calendar } from 'lucide-react'
+import { ArrowRight, Bike, CheckCircle, Truck, Search, Shield, Headphones, Trophy, RotateCcw, Star, Wrench, Calendar, Plus } from 'lucide-react'
 import { getBikes, getCategories } from '../../api/public'
 import Navbar from '../../components/store/Navbar'
 import Footer from '../../components/store/Footer'
@@ -58,12 +59,109 @@ function BikeCard({ bike }) {
   )
 }
 
+const PAGE_SIZE  = 8    // bikes revealed per "Show more"
+const PICKS_MAX  = 4    // Staff Picks row cap
+const FETCH_MAX  = 48   // API hard cap per request; home page derives per-type counts from this one fetch
+
+function CountBadge({ value, tone = 'dark' }) {
+  const tones = {
+    dark:    'bg-gray-900 text-white',
+    light:   'bg-gray-100 text-gray-600',
+    muted:   'bg-gray-100 text-gray-400',
+    onBrand: 'bg-white/20 text-white',
+  }
+  return (
+    <span className={`inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-full text-xs font-semibold tabular-nums ${tones[tone]}`}>
+      {value}
+    </span>
+  )
+}
+
+/* One pill in the type row. A real filter (button), not a link.
+   Empty types render as a dashed, non-interactive pill so there are no dead ends. */
+function TypePill({ label, count, active, disabled, onClick }) {
+  const base = 'shrink-0 inline-flex items-center gap-2 pl-4 pr-1.5 py-1.5 rounded-full text-sm font-semibold border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-500 focus-visible:ring-offset-2'
+  if (disabled) {
+    return (
+      <span className={`${base} border-dashed border-gray-300 text-gray-400 bg-transparent cursor-default select-none`}
+            title={`No ${label.toLowerCase()} bikes in stock right now`}>
+        {label}
+        <CountBadge value={0} tone="muted" />
+      </span>
+    )
+  }
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={`${base} ${active
+        ? 'mx-gradient-bg border-transparent text-white shadow-md shadow-pink-900/20'
+        : 'bg-white border-gray-300 text-gray-700 hover:border-pink-600 hover:text-pink-600'}`}
+    >
+      {label}
+      <CountBadge value={count} tone={active ? 'onBrand' : 'light'} />
+    </button>
+  )
+}
+
+function SkeletonGrid({ n = 4 }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6" aria-hidden="true">
+      {Array.from({ length: n }).map((_, i) => (
+        <div key={i} className="bg-white rounded-2xl ring-1 ring-gray-200/80 overflow-hidden animate-pulse">
+          <div className="aspect-[4/5] bg-gray-100" />
+          <div className="p-4 space-y-2">
+            <div className="h-3 w-12 bg-gray-100 rounded" />
+            <div className="h-4 w-3/4 bg-gray-100 rounded" />
+            <div className="h-4 w-1/3 bg-gray-100 rounded" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function Home() {
-  const { data: featuredData } = useQuery({ queryKey: ['public-featured'], queryFn: () => getBikes({ featured: 1, limit: 8 }) })
+  // One fetch feeds both sections: Staff Picks (featured flag) and the All Bikes
+  // grid with its per-type counts. Keyed under 'public-bikes' so admin saves
+  // (which invalidate that prefix) refresh the home page too.
+  const { data: bikesData, isLoading: bikesLoading } = useQuery({
+    queryKey: ['public-bikes', 'home'],
+    queryFn:  () => getBikes({ limit: FETCH_MAX, sort: 'newest' }),
+  })
   const { data: categoriesData } = useQuery({ queryKey: ['public-categories'], queryFn: getCategories })
 
-  const bikes      = featuredData?.bikes || []
+  const bikes      = bikesData?.bikes || []
+  const total      = bikesData?.total ?? bikes.length   // accurate even past FETCH_MAX
   const categories = categoriesData?.categories || []
+
+  const picks = useMemo(() => bikes.filter(b => b.featured).slice(0, PICKS_MAX), [bikes])
+  const countsByType = useMemo(() => {
+    const m = {}
+    for (const b of bikes) m[b.category_id] = (m[b.category_id] || 0) + 1
+    return m
+  }, [bikes])
+
+  // Stocked types lead the row (alphabetical), empty ones trail, so a phone
+  // never opens on a row of dashed zeros.
+  const orderedCategories = useMemo(() => [...categories].sort((a, b) => {
+    const sa = countsByType[a.id] ? 0 : 1, sb = countsByType[b.id] ? 0 : 1
+    return sa - sb || a.name.localeCompare(b.name)
+  }), [categories, countsByType])
+
+  const [activeType, setActiveType]     = useState(null)      // null = all types
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+  const selectType = (id) => { setActiveType(id); setVisibleCount(PAGE_SIZE) }
+
+  const filtered      = activeType == null ? bikes : bikes.filter(b => b.category_id === activeType)
+  const filteredTotal = activeType == null ? total : filtered.length
+  const visible       = filtered.slice(0, visibleCount)
+  const remaining     = filtered.length - visible.length           // what another click can reveal
+  const beyondFetch   = filteredTotal - filtered.length            // only >0 past FETCH_MAX
+  const activeCat     = activeType == null ? null : categories.find(c => c.id === activeType)
+  const activeLabel   = activeCat ? activeCat.name.toLowerCase() : null
+  const picksCols     = picks.length >= 4 ? 'lg:grid-cols-4' : picks.length === 3 ? 'lg:grid-cols-3' : 'lg:grid-cols-2 max-w-3xl'
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -212,34 +310,98 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Categories */}
-      {categories.length > 0 && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6">Shop by Category</h2>
-          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-            <Link to="/shop" className="shrink-0 px-5 py-2.5 rounded-full border-2 border-pink-600 text-pink-600 font-semibold text-sm hover:bg-pink-600 hover:text-white transition-colors">All</Link>
-            {categories.map(c => (
-              <Link key={c.id} to={categoryPath(c)} className="shrink-0 px-5 py-2.5 rounded-full border border-gray-300 text-gray-700 font-medium text-sm hover:border-pink-600 hover:text-pink-600 transition-colors">
-                {c.name}
-              </Link>
-            ))}
+      {/* Staff Picks: bikes flagged Featured in admin */}
+      {picks.length > 0 && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 pb-2" aria-labelledby="staff-picks">
+          <div className="mb-6">
+            <h2 id="staff-picks" className="text-2xl font-bold text-gray-900">Staff Picks</h2>
+            <p className="text-gray-500 text-sm mt-1">Hand-selected by our mechanics.</p>
           </div>
-        </div>
+          <div className={`grid grid-cols-1 sm:grid-cols-2 ${picksCols} gap-6`}>
+            {picks.map(b => <BikeCard key={b.id} bike={b} />)}
+          </div>
+        </section>
       )}
 
-      {/* Featured bikes */}
-      {bikes.length > 0 && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-gray-900">Just Arrived</h2>
-            <Link to="/shop" className="text-pink-600 font-medium text-sm hover:text-pink-700 flex items-center gap-1">
-              View all <ArrowRight size={14} />
+      {/* All bikes: every in-stock bike, filterable by type, revealed in batches */}
+      {(bikesLoading || bikes.length > 0) && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12" aria-labelledby="all-bikes">
+          <div className="flex items-end justify-between gap-4 mb-5">
+            <div>
+              <h2 id="all-bikes" className="text-2xl font-bold text-gray-900 flex items-center gap-2.5">
+                All bikes
+                {!bikesLoading && <CountBadge value={total} tone="dark" />}
+              </h2>
+              <p className="text-gray-500 text-sm mt-1">Everything in stock right now, newest first. Pick a type to narrow it down.</p>
+            </div>
+            <Link to="/shop" className="hidden sm:inline-flex items-center gap-1 shrink-0 text-pink-600 font-medium text-sm hover:text-pink-700">
+              Open full shop <ArrowRight size={14} />
             </Link>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {bikes.map(b => <BikeCard key={b.id} bike={b} />)}
-          </div>
-        </div>
+
+          {/* Type row: a real filter for the grid below */}
+          {!bikesLoading && categories.length > 0 && (
+            <div role="group" aria-label="Filter by bike type"
+                 className="flex gap-2.5 overflow-x-auto pb-3 mb-5 -mx-4 px-4 sm:mx-0 sm:px-0 scrollbar-hide">
+              <TypePill label="All" count={total} active={activeType == null} onClick={() => selectType(null)} />
+              {orderedCategories.map(c => (
+                <TypePill
+                  key={c.id}
+                  label={c.name}
+                  count={countsByType[c.id] || 0}
+                  active={activeType === c.id}
+                  disabled={!countsByType[c.id]}
+                  onClick={() => selectType(c.id)}
+                />
+              ))}
+            </div>
+          )}
+
+          {bikesLoading ? (
+            <SkeletonGrid n={4} />
+          ) : visible.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {visible.map(b => <BikeCard key={b.id} bike={b} />)}
+            </div>
+          ) : (
+            <div className="rounded-2xl ring-1 ring-gray-200/80 bg-white px-6 py-12 text-center">
+              <p className="font-semibold text-gray-900">No {activeLabel} bikes in stock right now.</p>
+              <button type="button" onClick={() => selectType(null)} className="mt-2 text-pink-600 font-medium text-sm hover:text-pink-700">
+                Show all {total} bikes
+              </button>
+            </div>
+          )}
+
+          {/* Reveal control / end of list */}
+          {!bikesLoading && visible.length > 0 && (
+            <div className="mt-8 flex flex-col items-center gap-3">
+              {remaining > 0 ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCount(n => n + PAGE_SIZE)}
+                    className="w-full sm:w-auto sm:min-w-[22rem] inline-flex items-center justify-center gap-2 bg-white ring-1 ring-gray-300 hover:ring-pink-600 hover:text-pink-600 text-gray-900 px-8 py-3.5 rounded-xl font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-500 focus-visible:ring-offset-2"
+                  >
+                    <Plus size={18} /> Show {Math.min(PAGE_SIZE, remaining)} more
+                  </button>
+                  <p className="text-xs text-gray-500 tabular-nums" aria-live="polite">
+                    Showing {visible.length} of {filteredTotal}{activeLabel ? ` ${activeLabel}` : ''} bikes
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-gray-600 text-center" aria-live="polite">
+                  {beyondFetch > 0
+                    ? <>Showing {visible.length} of {filteredTotal}. </>
+                    : <>That&apos;s all {filteredTotal}{activeLabel ? ` ${activeLabel}` : ''} bikes in stock. </>}
+                  <Link to={activeCat ? categoryPath(activeCat) : '/shop'}
+                        className="text-pink-600 font-medium hover:text-pink-700 inline-flex items-center gap-1">
+                    {beyondFetch > 0 ? 'See the rest in the shop' : 'Need a size or price filter? Open the shop'} <ArrowRight size={14} />
+                  </Link>
+                </p>
+              )}
+            </div>
+          )}
+        </section>
       )}
 
       {/* Dark zone — Difference + CTA flow as one continuous section into the footer */}

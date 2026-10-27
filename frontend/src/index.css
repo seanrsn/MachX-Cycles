@@ -30,6 +30,10 @@
   filter: brightness(1.06);
 }
 
+/* Horizontal pill rows: scrollable without a visible scrollbar */
+.scrollbar-hide { scrollbar-width: none; -ms-overflow-style: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
 @layer base {
   body {
     -webkit-font-smoothing: antialiased;
