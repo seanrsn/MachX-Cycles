@@ -104,8 +104,10 @@ CI deploy: push to main or `claude/*`, the workflow runs `bash deploy.sh` itself
 1. **`prepare` job**: auto-merges `claude/*` branches/PRs into main, deletes branch.
 2. **`deploy-backend`**: checks out main, runs `bash backend/deploy.sh` which packages
    each Lambda (with `shared/` baked in) and pushes to AWS via the deploy.sh mapping.
-3. **`deploy-frontend`**: writes `.env` with API URL + Cognito + Stripe pub key,
-   `npm ci && npm run build`, syncs `frontend/dist/` to S3, invalidates CloudFront.
+3. **`deploy-frontend`**: **DISABLED** (`if: false`). Pushing does NOT update the
+   website. The frontend is deployed by hand:
+   `cd frontend && bash deploy-frontend.sh` (full build, 4-pass S3 sync with
+   cache headers, CloudFront invalidation). Live within ~1 minute.
 
 **Workflow per user's preference:** phone Claude (claude.ai) pushes to `claude/*` →
 auto-merge + deploy. **Desktop Claude NEVER pushes** unless explicitly asked, and
@@ -157,6 +159,8 @@ Core tables (see `database/schema.sql` for canon):
 - **`shared/` gets copied into every Lambda zip** by deploy.sh. So importing
   `from shared.db import get_conn` works inside the Lambda but not when running
   Python locally from the repo root unless you cd into backend.
+- **A green CI run does not mean the site changed.** Only Lambdas deploy from CI;
+  run `frontend/deploy-frontend.sh` for the storefront.
 - **Stripe key in deploy.yml is a live key.** Check before testing — there's no
   staging environment. Use Stripe test mode locally with a different key.
 - **`task.txt` references stale paths** (`C:\Users\super\Projects\machx-cycles\…`).
